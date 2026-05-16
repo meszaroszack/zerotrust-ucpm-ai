@@ -48,26 +48,35 @@ router.post('/save-ai', async (req, res) => {
   // Verify the key actually works
   try {
     const resp = await axios.post('https://api.perplexity.ai/chat/completions', {
-      model: perplexityModel || 'llama-3.1-sonar-large-128k-online',
-      messages: [{ role: 'user', content: 'Reply with just the word OK.' }],
-      max_tokens: 10
+      model: 'sonar',
+      messages: [
+        { role: 'system', content: 'You are a helpful assistant.' },
+        { role: 'user', content: 'Say OK.' }
+      ],
+      max_tokens: 5
     }, {
-      headers: { Authorization: `Bearer ${perplexityApiKey}` },
-      timeout: 15000
+      headers: {
+        Authorization: `Bearer ${perplexityApiKey}`,
+        'Content-Type': 'application/json'
+      },
+      timeout: 20000
     });
     if (!resp.data?.choices) throw new Error('Unexpected response');
   } catch (err) {
-    const msg = err.response?.status === 401 || err.response?.status === 403
-      ? 'This API key was rejected. Please double-check it.'
-      : err.response?.status
-      ? `Perplexity returned an error (${err.response.status}). Please try again.`
-      : 'Could not reach Perplexity. Check your internet connection.';
+    const status = err.response?.status;
+    const msg = (status === 401 || status === 403)
+      ? 'That API key was not accepted. Please double-check it and try again.'
+      : status === 400
+      ? 'The key format looks wrong. Make sure you copied the full key from perplexity.ai/settings/api.'
+      : status
+      ? `Perplexity returned an error (${status}). Please try again.`
+      : 'Could not reach Perplexity. Check your internet connection and try again.';
     return res.status(400).json({ error: msg });
   }
 
   ConfigModel.save({
     perplexityApiKey,
-    perplexityModel: perplexityModel || 'llama-3.1-sonar-large-128k-online'
+    perplexityModel: perplexityModel || 'sonar-pro'
   });
   res.json({ success: true, message: 'Key verified and saved.' });
 });
