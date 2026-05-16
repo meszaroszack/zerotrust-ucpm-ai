@@ -27,7 +27,7 @@ const WorkspaceModel = {
     return readJSON(WORKSPACE_FILE, null);
   },
 
-  create({ activeOrgId, activeOrgName, activeBrandName, otCredentials }) {
+  create({ activeOrgId, activeOrgName, activeBrandName, otCredentials, simulated }) {
     const ws = {
       id: uuidv4(),
       parentOrgName: process.env.ONETRUST_PARENT_ORG_NAME || 'Meszaros - Do Not Touch',
@@ -37,6 +37,7 @@ const WorkspaceModel = {
       status: 'active',
       createdAt: new Date().toISOString(),
       otCredentials,
+      simulated: !!simulated,
       sourceInputs: [],
       scenarios: [],
       purposes: [],

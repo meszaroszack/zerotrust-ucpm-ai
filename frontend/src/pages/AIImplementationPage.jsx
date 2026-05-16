@@ -96,6 +96,82 @@ function AICard({ result, onApprove }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// FollowupQuestions — multi-select chips + "Other" freetext
+//
+// answers shape per question:
+//   { selected: string[], otherText: string }
+// For freetext-only questions (no options) selected=[] and otherText holds value.
+// ---------------------------------------------------------------------------
+function FollowupQuestion({ q, answer, onChange }) {
+  const sel = answer?.selected || [];
+  const otherText = answer?.otherText || '';
+  const otherOpen = sel.includes('Other');
+
+  function toggleOption(opt) {
+    if (q.multiSelect === false) {
+      // Single-select: replace selection
+      onChange({ selected: sel[0] === opt ? [] : [opt], otherText: opt === 'Other' ? otherText : '' });
+    } else {
+      // Multi-select (default)
+      const next = sel.includes(opt)
+        ? sel.filter(s => s !== opt)
+        : [...sel, opt];
+      onChange({ selected: next, otherText: next.includes('Other') ? otherText : '' });
+    }
+  }
+
+  if (q.options?.length > 0) {
+    return (
+      <>
+        <div className="flex flex-wrap gap-2">
+          {q.options.map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              onClick={() => toggleOption(opt)}
+              className={clsx('px-3 py-1.5 rounded-lg text-xs border transition-all', {
+                'bg-brand-primary/15 border-brand-primary/40 text-brand-primary': sel.includes(opt),
+                'bg-white/3 border-white/10 text-slate-400 hover:border-white/20': !sel.includes(opt)
+              })}
+            >{opt}</button>
+          ))}
+          {/* Always append Other chip */}
+          <button
+            type="button"
+            onClick={() => toggleOption('Other')}
+            className={clsx('px-3 py-1.5 rounded-lg text-xs border transition-all', {
+              'bg-brand-primary/15 border-brand-primary/40 text-brand-primary': otherOpen,
+              'bg-white/3 border-white/10 text-slate-400 hover:border-white/20': !otherOpen
+            })}
+          >Other</button>
+        </div>
+        {otherOpen && (
+          <input
+            type="text"
+            value={otherText}
+            onChange={e => onChange({ selected: sel, otherText: e.target.value })}
+            className="input-dark text-sm mt-2"
+            placeholder="Describe your answer…"
+            autoFocus
+          />
+        )}
+      </>
+    );
+  }
+
+  // Freetext-only question
+  return (
+    <input
+      type="text"
+      value={otherText}
+      onChange={e => onChange({ selected: [], otherText: e.target.value })}
+      className="input-dark text-sm"
+      placeholder="Your answer…"
+    />
+  );
+}
+
 function FollowupQuestions({ questions, answers, onChange, onSubmit, loading }) {
   return (
     <div className="card-dark p-5">
@@ -104,42 +180,30 @@ function FollowupQuestions({ questions, answers, onChange, onSubmit, loading }) 
         <h3 className="font-heading font-semibold text-white">Expert Follow-up Questions</h3>
         <span className="text-xs text-slate-500 ml-auto">{questions.length} questions</span>
       </div>
-      <div className="space-y-4">
+      <div className="space-y-5">
         {questions.map((q) => (
-          <div key={q.id} className="border-b border-white/5 pb-4 last:border-0">
+          <div key={q.id} className="border-b border-white/5 pb-5 last:border-0 last:pb-0">
             <label className="block text-sm font-medium text-white mb-1">
               {q.question}
-              {q.required && <span className="text-brand-error ml-1">*</span>}
+              {q.required && <span className="text-red-400 ml-1">*</span>}
+              {q.options?.length > 0 && (
+                <span className="ml-2 text-[10px] font-normal text-slate-500 uppercase tracking-widest">
+                  {q.multiSelect === false ? 'single choice' : 'select all that apply'}
+                </span>
+              )}
             </label>
-            <div className="text-xs text-slate-500 mb-2">{q.helpText}</div>
-            {q.options?.length > 0 ? (
-              <div className="flex flex-wrap gap-2">
-                {q.options.map((opt) => (
-                  <button
-                    key={opt}
-                    onClick={() => onChange(q.id, opt)}
-                    className={clsx('px-3 py-1.5 rounded-lg text-xs border transition-all', {
-                      'bg-brand-primary/15 border-brand-primary/40 text-brand-primary': answers[q.id] === opt,
-                      'bg-white/3 border-white/10 text-slate-400 hover:border-white/20': answers[q.id] !== opt
-                    })}
-                  >{opt}</button>
-                ))}
-              </div>
-            ) : (
-              <input
-                type="text"
-                value={answers[q.id] || ''}
-                onChange={e => onChange(q.id, e.target.value)}
-                className="input-dark text-sm"
-                placeholder="Your answer..."
-              />
-            )}
+            {q.helpText && <div className="text-xs text-slate-500 mb-2">{q.helpText}</div>}
+            <FollowupQuestion
+              q={q}
+              answer={answers[q.id]}
+              onChange={(val) => onChange(q.id, val)}
+            />
           </div>
         ))}
       </div>
-      <button onClick={onSubmit} disabled={loading} className="btn-primary w-full justify-center mt-4">
+      <button onClick={onSubmit} disabled={loading} className="btn-primary w-full justify-center mt-5">
         {loading
-          ? <><Loader2 size={15} className="animate-spin" />Generating Blueprint...</>
+          ? <><Loader2 size={15} className="animate-spin" />Generating Blueprint…</>
           : <>Generate Implementation Blueprint <Sparkles size={15} /></>}
       </button>
     </div>
@@ -232,18 +296,45 @@ export default function AIImplementationPage() {
   };
 
   // ── Blueprint ──────────────────────────────────────────────────────────────
+  //
+  // Flatten answers from { selected, otherText } → human-readable string
+  // before sending to AI so prompts stay clean.
+  function flattenAnswers(raw) {
+    const out = {};
+    for (const [id, val] of Object.entries(raw)) {
+      if (!val) { out[id] = ''; continue; }
+      if (typeof val === 'string') { out[id] = val; continue; }
+      // Rich answer object
+      const parts = [...(val.selected || [])];
+      if (val.otherText?.trim()) {
+        const hasOtherChip = parts.includes('Other');
+        if (hasOtherChip) {
+          parts[parts.indexOf('Other')] = `Other: ${val.otherText.trim()}`;
+        } else {
+          parts.push(val.otherText.trim());
+        }
+      }
+      out[id] = parts.join(', ') || '';
+    }
+    return out;
+  }
+
   const handleGenerateBlueprint = async () => {
     setLoading(true); setLoadingMsg('Building implementation blueprint…'); setPageError('');
     try {
-      const ctx = { ...intakeResult, answers };
-      // Run all five concurrently — each failure is isolated
-      const [prog, scenarios, purposes, elements, cps] = await Promise.allSettled([
-        aiExtractProgram({ context: ctx }),
-        aiGenerateScenarios({ context: ctx }),
-        aiRecommendPurposes({ context: ctx }),
-        aiRecommendDataElements({ context: ctx }),
-        aiRecommendCollectionPoints({ context: ctx }),
-      ]);
+      const ctx = { ...intakeResult, answers: flattenAnswers(answers) };
+
+      // Named steps — run all five concurrently, partial failures are amber-warned not blocking
+      const STEPS = [
+        { label: 'Program Config',    call: aiExtractProgram },
+        { label: 'Scenarios',         call: aiGenerateScenarios },
+        { label: 'Purposes',          call: aiRecommendPurposes },
+        { label: 'Data Elements',     call: aiRecommendDataElements },
+        { label: 'Collection Points', call: aiRecommendCollectionPoints },
+      ];
+
+      const results = await Promise.allSettled(STEPS.map(s => s.call({ context: ctx })));
+      const [prog, scenarios, purposes, elements, cps] = results;
 
       const bp = {
         program:          prog.status      === 'fulfilled' ? prog.value.data      : null,
@@ -253,12 +344,19 @@ export default function AIImplementationPage() {
         collectionPoints: cps.status       === 'fulfilled' ? cps.value.data       : null,
       };
 
-      // Surface partial failures as warnings (don't block the blueprint)
-      const failed = [
-        prog, scenarios, purposes, elements, cps
-      ].filter(r => r.status === 'rejected').map(r => r.reason?.message || 'Unknown error');
+      // Surface named partial failures — never block blueprint delivery
+      const failed = results
+        .map((r, i) => r.status === 'rejected'
+          ? `${STEPS[i].label}: ${r.reason?.response?.data?.error || r.reason?.message || 'unknown error'}`
+          : null
+        )
+        .filter(Boolean);
+
       if (failed.length > 0) {
-        setPageError(`Blueprint generated with ${failed.length} partial failure(s): ${failed.join('; ')}`);
+        setPageError(
+          `Blueprint generated with ${failed.length} of ${STEPS.length} step(s) failing — ` +
+          failed.join(' · ')
+        );
       }
 
       setBlueprint(bp);
@@ -463,14 +561,24 @@ export default function AIImplementationPage() {
 
               <div className="grid grid-cols-2 gap-3 mb-4">
                 {[
-                  { label: 'Purposes',          count: blueprint.purposes?.proposedObjects?.length || 0 },
-                  { label: 'Data Elements',     count: blueprint.dataElements?.proposedObjects?.length || 0 },
-                  { label: 'Scenarios',         count: blueprint.scenarios?.scenarios?.length || 0 },
-                  { label: 'Collection Points', count: blueprint.collectionPoints?.proposedObjects?.length || 0 },
+                  { label: 'Purposes',          count: blueprint.purposes?.proposedObjects?.length,          ok: !!blueprint.purposes },
+                  { label: 'Data Elements',     count: blueprint.dataElements?.proposedObjects?.length,      ok: !!blueprint.dataElements },
+                  { label: 'Scenarios',         count: blueprint.scenarios?.scenarios?.length,               ok: !!blueprint.scenarios },
+                  { label: 'Collection Points', count: blueprint.collectionPoints?.proposedObjects?.length,  ok: !!blueprint.collectionPoints },
                 ].map((s) => (
-                  <div key={s.label} className="p-3 rounded-lg bg-white/3 border border-white/6 text-center">
-                    <div className="text-2xl font-heading font-bold text-white">{s.count}</div>
-                    <div className="text-xs text-slate-500 mt-0.5">{s.label}</div>
+                  <div
+                    key={s.label}
+                    className={clsx('p-3 rounded-lg border text-center', {
+                      'bg-white/3 border-white/6': s.ok,
+                      'bg-amber-950/20 border-amber-900/30': !s.ok
+                    })}
+                  >
+                    <div className={clsx('text-2xl font-heading font-bold', s.ok ? 'text-white' : 'text-amber-400')}>
+                      {s.ok ? (s.count ?? 0) : '!'}
+                    </div>
+                    <div className={clsx('text-xs mt-0.5', s.ok ? 'text-slate-500' : 'text-amber-600')}>
+                      {s.ok ? s.label : `${s.label} (failed)`}
+                    </div>
                   </div>
                 ))}
               </div>

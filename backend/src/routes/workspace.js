@@ -5,12 +5,12 @@ const { WorkspaceModel } = require('../models/workspace');
 
 // POST /api/workspace/start
 router.post('/start', authenticate, async (req, res) => {
-  const { activeOrgId, activeOrgName, activeBrandName, otCredentials } = req.body;
+  const { activeOrgId, activeOrgName, activeBrandName, otCredentials, simulated } = req.body;
   if (!activeOrgName || !activeBrandName) {
     return res.status(400).json({ error: 'activeOrgName and activeBrandName are required' });
   }
   try {
-    const ws = WorkspaceModel.create({ activeOrgId, activeOrgName, activeBrandName, otCredentials });
+    const ws = WorkspaceModel.create({ activeOrgId, activeOrgName, activeBrandName, otCredentials, simulated });
     res.json({ success: true, workspace: ws });
   } catch (err) {
     res.status(500).json({ error: err.message });

@@ -91,4 +91,7 @@ export const getGeoPreview = (params) => api.get('/geolocation/preview', { param
 export const getSettings = () => api.get('/settings');
 export const saveSettings = (data) => api.post('/settings', data);
 
+// OneTrust reconciliation
+export const reconcileOT = () => api.get('/onetrust/reconcile');
+
 export default api;
