@@ -76,7 +76,7 @@ router.post('/save-ai', async (req, res) => {
 
   ConfigModel.save({
     perplexityApiKey,
-    perplexityModel: perplexityModel || 'sonar-pro'
+    perplexityModel: perplexityModel || 'sonar'
   });
   res.json({ success: true, message: 'Key verified and saved.' });
 });

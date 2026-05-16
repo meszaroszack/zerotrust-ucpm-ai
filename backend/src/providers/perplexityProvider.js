@@ -7,7 +7,7 @@ async function complete({ messages, systemPrompt, apiKey, model }) {
   // Resolve key: caller-provided → config file → env var
   const cfg = ConfigModel.get();
   const resolvedKey = apiKey || cfg.perplexityApiKey || process.env.PERPLEXITY_API_KEY;
-  const resolvedModel = model || cfg.perplexityModel || process.env.PERPLEXITY_MODEL || 'sonar-pro';
+  const resolvedModel = model || cfg.perplexityModel || process.env.PERPLEXITY_MODEL || 'sonar';
 
   if (!resolvedKey) {
     throw new Error('No Perplexity API key found. Please add your API key in the application settings.');
