@@ -6,6 +6,8 @@
 const fs = require('fs');
 const path = require('path');
 
+const VALID_MODELS = ['sonar', 'sonar-pro', 'sonar-reasoning', 'sonar-reasoning-pro', 'r1-1776'];
+
 const DATA_DIR = path.join(__dirname, '../../data');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
 
@@ -33,7 +35,7 @@ const ConfigModel = {
       hasAdminPassword: !!(stored?.adminPassword || process.env.APP_ADMIN_PASSWORD),
       // AI
       perplexityApiKey: process.env.PERPLEXITY_API_KEY || stored?.perplexityApiKey || '',
-      perplexityModel: process.env.PERPLEXITY_MODEL || stored?.perplexityModel || 'llama-3.1-sonar-large-128k-online',
+      perplexityModel: process.env.PERPLEXITY_MODEL || (VALID_MODELS.includes(stored?.perplexityModel) ? stored.perplexityModel : 'sonar'),
       // OT defaults (can also be set per-session via connection wizard)
       otBaseUrl: process.env.ONETRUST_BASE_URL || stored?.otBaseUrl || 'https://app.onetrust.com',
       otClientId: process.env.ONETRUST_CLIENT_ID || stored?.otClientId || '',
