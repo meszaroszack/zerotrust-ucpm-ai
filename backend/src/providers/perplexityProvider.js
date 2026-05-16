@@ -13,25 +13,47 @@ async function complete({ messages, systemPrompt, apiKey, model }) {
     throw new Error('No Perplexity API key found. Please add your API key in the application settings.');
   }
 
+  // Perplexity standard accounts do not support the 'system' role — it returns a 400.
+  // Prepend the system prompt as the first user message instead, then alternate roles properly.
   const allMessages = [];
-  if (systemPrompt) allMessages.push({ role: 'system', content: systemPrompt });
-  allMessages.push(...messages);
+  if (systemPrompt) {
+    // Inject system content as a leading user message so the first role is always 'user'
+    const firstUserContent = `[System Instructions]\n${systemPrompt}\n\n[User Request]\n${messages[0]?.content || ''}`;
+    allMessages.push({ role: 'user', content: firstUserContent });
+    // Append any remaining messages (skip index 0 since we merged it above)
+    allMessages.push(...messages.slice(1));
+  } else {
+    allMessages.push(...messages);
+  }
 
-  const resp = await axios.post(
-    `${PERPLEXITY_BASE}/chat/completions`,
-    {
-      model: resolvedModel,
-      messages: allMessages,
-      temperature: 0.2,
-      max_tokens: 4096
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${resolvedKey}`,
-        'Content-Type': 'application/json'
+  let resp;
+  try {
+    resp = await axios.post(
+      `${PERPLEXITY_BASE}/chat/completions`,
+      {
+        model: resolvedModel,
+        messages: allMessages,
+        temperature: 0.2,
+        max_tokens: 4096
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${resolvedKey}`,
+          'Content-Type': 'application/json'
+        }
       }
-    }
-  );
+    );
+  } catch (err) {
+    // Log the full Perplexity error body so we can actually debug it
+    const body = err.response?.data;
+    const status = err.response?.status;
+    console.error('[Perplexity] HTTP', status, JSON.stringify(body));
+    // Re-throw with meaningful message
+    const detail = body?.error?.message || body?.detail || body?.message || JSON.stringify(body) || err.message;
+    const error = new Error(`Perplexity ${status || 'error'}: ${detail}`);
+    error.response = err.response;
+    throw error;
+  }
 
   const raw = resp.data.choices?.[0]?.message?.content || '';
   return parseStructuredResponse(raw);

@@ -46,12 +46,15 @@ async function runAI(promptData) {
 
 function handleError(res, err, context) {
   console.error(`[AI/${context}]`, err.message);
+  const status = err.response?.status;
   const msg = err.message?.includes('API key')
     ? err.message
-    : err.response?.status === 429
+    : status === 429
     ? 'Rate limit reached. Please wait a moment and try again.'
-    : err.response?.status === 401
+    : status === 401
     ? 'AI API key rejected. Please update your key in Settings.'
+    : status === 400
+    ? `AI request rejected (400): ${err.message}`
     : `AI request failed: ${err.message}`;
   res.status(500).json({ error: msg });
 }
