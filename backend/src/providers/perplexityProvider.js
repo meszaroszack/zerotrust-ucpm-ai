@@ -8,6 +8,9 @@ async function complete({ messages, systemPrompt, apiKey, model }) {
   const cfg = ConfigModel.get();
   const resolvedKey = apiKey || cfg.perplexityApiKey || process.env.PERPLEXITY_API_KEY;
   const resolvedModel = model || cfg.perplexityModel || process.env.PERPLEXITY_MODEL || 'sonar';
+  const VALID = ['sonar', 'sonar-pro', 'sonar-reasoning', 'sonar-reasoning-pro', 'r1-1776'];
+  if (!VALID.includes(resolvedModel)) throw new Error(`Invalid Perplexity model "${resolvedModel}". Valid: ${VALID.join(', ')}`);
+
 
   if (!resolvedKey) {
     throw new Error('No Perplexity API key found. Please add your API key in the application settings.');
