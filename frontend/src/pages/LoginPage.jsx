@@ -23,7 +23,7 @@ export default function LoginPage() {
       setAuth(r.data.token, { email: r.data.email, role: r.data.role });
       navigate('/dashboard');
     } catch (err) {
-      setError(err.response?.data?.error || 'Login failed. Check your credentials.');
+      setError(err.response?.data?.error || 'Incorrect email or password.');
     } finally {
       setLoading(false);
     }
@@ -31,11 +31,8 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-bg-dark flex items-center justify-center relative overflow-hidden">
-      {/* Background grid */}
+      {/* Background */}
       <div className="absolute inset-0 bg-[linear-gradient(rgba(11,95,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(11,95,255,0.03)_1px,transparent_1px)] bg-[size:48px_48px]" />
-      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-bg-dark/80" />
-
-      {/* Glow */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-brand-primary/8 rounded-full blur-3xl pointer-events-none" />
 
       <motion.div
@@ -44,7 +41,7 @@ export default function LoginPage() {
         transition={{ duration: 0.5 }}
         className="relative w-full max-w-md px-4"
       >
-        {/* Logo area */}
+        {/* Logo */}
         <div className="text-center mb-10">
           <motion.div
             initial={{ scale: 0.8, opacity: 0 }}
@@ -60,7 +57,7 @@ export default function LoginPage() {
 
         {/* Card */}
         <div className="card-dark p-8">
-          <h2 className="font-heading text-lg font-semibold text-white mb-6">Operator Access</h2>
+          <h2 className="font-heading text-lg font-semibold text-white mb-6">Sign In</h2>
 
           {error && (
             <motion.div
@@ -83,7 +80,7 @@ export default function LoginPage() {
                   value={email}
                   onChange={e => setEmail(e.target.value)}
                   className="input-dark pl-10"
-                  placeholder="admin@zerotrust.ai"
+                  placeholder="your@email.com"
                   required
                   autoFocus
                 />
@@ -111,8 +108,11 @@ export default function LoginPage() {
             <button type="submit" disabled={loading} className="btn-primary w-full justify-center mt-2 py-3">
               {loading ? (
                 <span className="flex items-center gap-2">
-                  <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/></svg>
-                  Authenticating...
+                  <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                  </svg>
+                  Signing in...
                 </span>
               ) : (
                 <span className="flex items-center gap-2">Sign In <ArrowRight size={15} /></span>
@@ -121,10 +121,7 @@ export default function LoginPage() {
           </form>
         </div>
 
-        <div className="text-center mt-6 space-y-2">
-          <p className="text-slate-600 text-xs">ZEROTRUST AI · Beta</p>
-          <a href="/setup" className="text-xs text-slate-700 hover:text-slate-500 transition-colors">First time? Set up your account →</a>
-        </div>
+        <p className="text-center text-slate-700 text-xs mt-6">ZEROTRUST AI · Beta</p>
       </motion.div>
     </div>
   );

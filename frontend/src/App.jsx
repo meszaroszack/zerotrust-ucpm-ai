@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useAppStore } from './store/appStore';
 import { getSetupStatus } from './utils/api';
 import SetupPage from './pages/SetupPage';
@@ -36,7 +36,7 @@ function Spinner() {
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"/>
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
         </svg>
-        <span className="text-slate-500 text-sm">Loading ZEROTRUST AI...</span>
+        <span className="text-slate-500 text-sm">Loading...</span>
       </div>
     </div>
   );
@@ -44,46 +44,46 @@ function Spinner() {
 
 export default function App() {
   const theme = useAppStore(s => s.theme);
-  const [setupStatus, setSetupStatus] = useState(null); // null = loading
-  const [showSetup, setShowSetup] = useState(false);
+  // 'loading' | 'setup' | 'ready'
+  const [appState, setAppState] = useState('loading');
 
   useEffect(() => {
     if (theme === 'dark') document.documentElement.classList.add('dark');
     else document.documentElement.classList.remove('dark');
   }, [theme]);
 
-  // Check if this is a first run
   useEffect(() => {
     getSetupStatus()
       .then(r => {
-        const status = r.data;
-        setSetupStatus(status);
-        if (status.isFirstRun || (!status.hasAdminAccount && !status.hasAIKey)) {
-          setShowSetup(true);
-        }
+        const s = r.data;
+        // Go to setup if: explicitly first run, OR missing admin account, OR missing AI key
+        const needsSetup = s.isFirstRun || !s.hasAdminAccount || !s.hasAIKey;
+        setAppState(needsSetup ? 'setup' : 'ready');
       })
       .catch(() => {
-        // If status check fails, just proceed to login
-        setSetupStatus({ isFirstRun: false });
+        // Can't reach backend yet — show setup so they can configure it
+        // (better than a broken login screen)
+        setAppState('setup');
       });
   }, []);
 
-  // Still checking
-  if (setupStatus === null) return <Spinner />;
+  if (appState === 'loading') return <Spinner />;
 
-  // First-run onboarding
-  if (showSetup) {
-    return <SetupPage onComplete={() => {
-      setShowSetup(false);
-      setSetupStatus({ isFirstRun: false, setupComplete: true });
-      window.location.href = '/login';
-    }} />;
+  if (appState === 'setup') {
+    return (
+      <SetupPage onComplete={() => {
+        setAppState('ready');
+        window.location.href = '/login';
+      }} />
+    );
   }
 
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/setup" element={<SetupPage onComplete={() => window.location.href = '/login'} />} />
+      <Route path="/setup" element={
+        <SetupPage onComplete={() => { window.location.href = '/login'; }} />
+      } />
       <Route path="/" element={<RequireAuth><AppShell /></RequireAuth>}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<DashboardPage />} />
