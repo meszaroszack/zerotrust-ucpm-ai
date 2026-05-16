@@ -5,11 +5,12 @@ const api = axios.create({
   timeout: 60000,
 });
 
-// Attach token from store on each request
 api.interceptors.request.use((config) => {
-  const stored = JSON.parse(localStorage.getItem('zerotrust-app') || '{}');
-  const token = stored?.state?.token;
-  if (token) config.headers.Authorization = `Bearer ${token}`;
+  try {
+    const stored = JSON.parse(localStorage.getItem('zerotrust-app') || '{}');
+    const token = stored?.state?.token;
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+  } catch {}
   return config;
 });
 
@@ -23,6 +24,13 @@ api.interceptors.response.use(
     return Promise.reject(err);
   }
 );
+
+// Setup / First-run (no auth needed)
+export const getSetupStatus = () => api.get('/setup/status');
+export const saveAdminAccount = (data) => api.post('/setup/save-admin', data);
+export const saveAIKey = (data) => api.post('/setup/save-ai', data);
+export const saveOTCredentials = (data) => api.post('/setup/save-ot', data);
+export const completeSetup = () => api.post('/setup/complete');
 
 // Auth
 export const login = (email, password) => api.post('/app/login', { email, password });

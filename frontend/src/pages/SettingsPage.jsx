@@ -1,162 +1,121 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Settings, Key, Brain, Globe2, Shield, Zap, CheckCircle2, AlertCircle, Loader2, Eye, EyeOff, Save } from 'lucide-react';
-import { useQuery, useMutation } from '@tanstack/react-query';
-import { getSettings, saveSettings } from '../utils/api';
+import {
+  Settings, Key, Brain, Shield, User, CheckCircle2, AlertCircle,
+  Loader2, Eye, EyeOff, Save, ExternalLink, Zap, Lock, Info
+} from 'lucide-react';
+import { saveAIKey, saveAdminAccount, saveOTCredentials } from '../utils/api';
+import { useAppStore } from '../store/appStore';
 import { clsx } from 'clsx';
 
-const PROVIDERS = [
-  { id: 'perplexity', name: 'Perplexity', status: 'live', desc: 'Primary AI provider. Powers all analysis and generation.' },
-  { id: 'openai', name: 'OpenAI', status: 'placeholder', desc: 'GPT-4o and GPT-4 series. Scaffold ready for activation.' },
-  { id: 'anthropic', name: 'Anthropic', status: 'placeholder', desc: 'Claude 3.5 Sonnet. Scaffold ready for activation.' },
-  { id: 'gemini', name: 'Google Gemini', status: 'placeholder', desc: 'Gemini 1.5 Pro. Scaffold ready for activation.' },
-  { id: 'azureOpenAI', name: 'Azure OpenAI', status: 'placeholder', desc: 'Enterprise Azure deployment. Requires endpoint config.' },
-  { id: 'bedrock', name: 'AWS Bedrock', status: 'placeholder', desc: 'AWS-hosted foundation models. Requires IAM credentials.' },
-];
-
 const TABS = [
-  { id: 'ai', label: 'AI Providers', icon: Brain },
-  { id: 'app', label: 'App Access', icon: Shield },
-  { id: 'workspace', label: 'Active Workspace', icon: Globe2 },
+  { id: 'ai', label: 'AI Settings', icon: Brain },
+  { id: 'account', label: 'My Account', icon: User },
+  { id: 'onetrust', label: 'OneTrust', icon: Shield },
 ];
 
-function ProviderCard({ provider, config, onChange }) {
-  const [showKey, setShowKey] = useState(false);
-  const isLive = provider.status === 'live';
-  const isEnabled = config?.enabled || false;
-
+function SaveButton({ loading, saved, onClick, label = 'Save Changes' }) {
   return (
-    <div className={clsx('card-dark p-4 border', isLive ? 'border-brand-accent/20' : 'border-white/5')}>
-      <div className="flex items-center gap-3 mb-3">
-        <div className={clsx('w-8 h-8 rounded-lg flex items-center justify-center', isLive ? 'bg-brand-accent/15' : 'bg-white/5')}>
-          <Zap size={14} className={isLive ? 'text-brand-accent' : 'text-slate-600'} />
-        </div>
-        <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <span className="font-heading font-semibold text-white text-sm">{provider.name}</span>
-            {isLive && <span className="badge bg-green-950 border-green-800 text-green-400 text-[10px]">Active</span>}
-            {!isLive && <span className="badge bg-slate-800 border-slate-700 text-slate-500 text-[10px]">Scaffold</span>}
-          </div>
-          <p className="text-xs text-slate-500 mt-0.5">{provider.desc}</p>
-        </div>
-        <label className="relative inline-flex items-center cursor-pointer">
-          <input type="checkbox" checked={isEnabled} onChange={e => onChange(provider.id, 'enabled', e.target.checked)} className="sr-only" />
-          <div className={clsx('w-9 h-5 rounded-full transition-colors', isEnabled ? 'bg-brand-primary' : 'bg-white/10')}>
-            <div className={clsx('w-4 h-4 bg-white rounded-full shadow transform transition-transform mt-0.5', isEnabled ? 'translate-x-4.5' : 'translate-x-0.5')} style={{ transform: isEnabled ? 'translateX(18px)' : 'translateX(2px)' }} />
-          </div>
-        </label>
-      </div>
+    <button onClick={onClick} disabled={loading || saved} className={clsx('btn-primary', saved && 'bg-green-700 hover:bg-green-700')}>
+      {loading ? <><Loader2 size={15} className="animate-spin" />Saving...</> :
+       saved ? <><CheckCircle2 size={15} />Saved</> :
+       <><Save size={15} />{label}</>}
+    </button>
+  );
+}
 
-      <div className="space-y-2">
-        <div>
-          <label className="label-dark">Model</label>
-          <input
-            value={config?.model || ''}
-            onChange={e => onChange(provider.id, 'model', e.target.value)}
-            className="input-dark font-mono text-xs"
-            placeholder={provider.id === 'perplexity' ? 'llama-3.1-sonar-large-128k-online' : 'model-name'}
-          />
-        </div>
-        <div>
-          <label className="label-dark">API Key</label>
-          <div className="relative">
-            <input
-              type={showKey ? 'text' : 'password'}
-              value={config?.apiKey || ''}
-              onChange={e => onChange(provider.id, 'apiKey', e.target.value)}
-              className="input-dark font-mono text-xs pr-10"
-              placeholder="sk-..."
-            />
-            <button type="button" onClick={() => setShowKey(!showKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500">
-              {showKey ? <EyeOff size={13} /> : <Eye size={13} />}
-            </button>
-          </div>
-        </div>
-        {provider.id === 'azureOpenAI' && (
-          <div>
-            <label className="label-dark">Azure Endpoint</label>
-            <input value={config?.endpoint || ''} onChange={e => onChange(provider.id, 'endpoint', e.target.value)} className="input-dark font-mono text-xs" placeholder="https://your-resource.openai.azure.com/" />
-          </div>
-        )}
-        {provider.id === 'bedrock' && (
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="label-dark">Region</label>
-              <input value={config?.region || 'us-east-1'} onChange={e => onChange(provider.id, 'region', e.target.value)} className="input-dark font-mono text-xs" />
-            </div>
-            <div>
-              <label className="label-dark">Access Key ID</label>
-              <input value={config?.accessKeyId || ''} onChange={e => onChange(provider.id, 'accessKeyId', e.target.value)} className="input-dark font-mono text-xs" />
-            </div>
-          </div>
-        )}
-      </div>
+function FieldRow({ label, hint, children }) {
+  return (
+    <div>
+      <label className="label-dark">{label}</label>
+      {children}
+      {hint && <p className="text-xs text-slate-600 mt-1.5">{hint}</p>}
     </div>
   );
 }
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState('ai');
-  const [settings, setSettings] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
+  const { user } = useAppStore();
 
-  const { isLoading } = useQuery({
-    queryKey: ['settings'],
-    queryFn: getSettings,
-    onSuccess: (r) => setSettings(r.data)
-  });
+  // AI tab state
+  const [apiKey, setApiKey] = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiSaved, setAiSaved] = useState(false);
+  const [aiError, setAiError] = useState('');
 
-  // Also fetch on mount
-  React.useEffect(() => {
-    getSettings().then(r => setSettings(r.data)).catch(() => {});
-  }, []);
+  // Account tab state
+  const [newEmail, setNewEmail] = useState(user?.email || '');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showNewPass, setShowNewPass] = useState(false);
+  const [accountLoading, setAccountLoading] = useState(false);
+  const [accountSaved, setAccountSaved] = useState(false);
+  const [accountError, setAccountError] = useState('');
 
-  const handleProviderChange = (providerId, field, value) => {
-    setSettings(s => ({
-      ...s,
-      aiProviders: {
-        ...s.aiProviders,
-        [providerId]: { ...s.aiProviders?.[providerId], [field]: value }
-      }
-    }));
-  };
+  // OT tab state
+  const [otBaseUrl, setOtBaseUrl] = useState('https://app.onetrust.com');
+  const [otClientId, setOtClientId] = useState('');
+  const [otClientSecret, setOtClientSecret] = useState('');
+  const [showOtSecret, setShowOtSecret] = useState(false);
+  const [otLoading, setOtLoading] = useState(false);
+  const [otSaved, setOtSaved] = useState(false);
+  const [otError, setOtError] = useState('');
 
-  const handleSave = async () => {
-    setSaving(true);
+  const handleSaveAI = async () => {
+    if (!apiKey.trim()) { setAiError('Please enter your API key.'); return; }
+    setAiLoading(true); setAiError('');
     try {
-      await saveSettings(settings);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
+      await saveAIKey({ perplexityApiKey: apiKey.trim() });
+      setAiSaved(true);
+      setTimeout(() => setAiSaved(false), 3000);
     } catch (e) {
-      alert('Save failed: ' + e.message);
-    } finally { setSaving(false); }
+      setAiError(e.response?.data?.error || 'That key did not work. Please check it and try again.');
+    } finally { setAiLoading(false); }
   };
 
-  if (isLoading || !settings) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 size={24} className="animate-spin text-brand-primary" />
-      </div>
-    );
-  }
+  const handleSaveAccount = async () => {
+    if (!newEmail) { setAccountError('Email is required.'); return; }
+    if (newPassword && newPassword !== confirmPassword) { setAccountError('Passwords do not match.'); return; }
+    if (newPassword && newPassword.length < 8) { setAccountError('Password must be at least 8 characters.'); return; }
+    setAccountLoading(true); setAccountError('');
+    try {
+      await saveAdminAccount({ email: newEmail, password: newPassword || undefined });
+      setAccountSaved(true);
+      setTimeout(() => setAccountSaved(false), 3000);
+    } catch (e) {
+      setAccountError(e.response?.data?.error || 'Could not update your account.');
+    } finally { setAccountLoading(false); }
+  };
+
+  const handleSaveOT = async () => {
+    setOtLoading(true); setOtError('');
+    try {
+      await saveOTCredentials({ otBaseUrl, otClientId, otClientSecret, otParentOrgName: 'Meszaros - Do Not Touch' });
+      setOtSaved(true);
+      setTimeout(() => setOtSaved(false), 3000);
+    } catch (e) {
+      setOtError(e.response?.data?.error || 'Could not save OneTrust credentials.');
+    } finally { setOtLoading(false); }
+  };
 
   return (
-    <div className="max-w-3xl mx-auto animate-fade-in">
+    <div className="max-w-2xl mx-auto animate-fade-in">
       <div className="mb-8">
         <div className="flex items-center gap-2 text-slate-500 text-xs font-mono mb-2 uppercase tracking-widest">
           <Settings size={12} /><span>Configuration</span>
         </div>
         <h1 className="font-heading text-3xl font-bold text-white">Settings</h1>
-        <p className="text-slate-500 text-sm mt-1">Configure AI providers, app access, and workspace behavior.</p>
+        <p className="text-slate-500 text-sm mt-1">Manage your AI connection, account, and OneTrust credentials.</p>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 p-1 bg-white/3 rounded-xl mb-6 border border-white/5 w-fit">
+      <div className="flex gap-1 p-1 bg-white/3 rounded-xl mb-6 border border-white/5">
         {TABS.map(t => (
           <button key={t.id} onClick={() => setActiveTab(t.id)}
-            className={clsx('flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-medium transition-all', {
-              'bg-brand-primary text-white': t.id === activeTab,
+            className={clsx('flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-medium transition-all', {
+              'bg-brand-primary text-white shadow': t.id === activeTab,
               'text-slate-500 hover:text-white': t.id !== activeTab
             })}>
             <t.icon size={13} />{t.label}
@@ -164,59 +123,168 @@ export default function SettingsPage() {
         ))}
       </div>
 
+      {/* AI Settings */}
       {activeTab === 'ai' && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2 p-3 rounded-lg bg-brand-primary/5 border border-brand-primary/15 text-xs text-slate-400 mb-4">
-            <Brain size={13} className="text-brand-primary" />
-            <span>Perplexity is the active AI provider. Other providers are scaffolded and ready for API key activation.</span>
+        <motion.div key="ai" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+          <div className="card-dark p-6">
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-10 h-10 rounded-xl bg-brand-accent/15 flex items-center justify-center">
+                <Brain size={20} className="text-brand-accent" />
+              </div>
+              <div>
+                <div className="font-heading font-semibold text-white">Perplexity AI</div>
+                <div className="text-xs text-slate-500">Powers all analysis, scenario generation, and recommendations</div>
+              </div>
+              <div className="ml-auto">
+                <span className="badge bg-green-950 border-green-800 text-green-400 text-[10px]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block mr-1" />
+                  Active
+                </span>
+              </div>
+            </div>
+
+            {aiError && (
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-red-950/50 border border-red-900/50 text-red-400 text-sm mb-4">
+                <AlertCircle size={14} />{aiError}
+              </div>
+            )}
+
+            <FieldRow label="API Key" hint="Your key is stored securely on this server and never shared.">
+              <div className="relative">
+                <Key size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" />
+                <input
+                  type={showKey ? 'text' : 'password'}
+                  value={apiKey}
+                  onChange={e => setApiKey(e.target.value)}
+                  className="input-dark pl-10 pr-10 font-mono text-xs"
+                  placeholder="Enter new key to replace current"
+                />
+                <button type="button" onClick={() => setShowKey(!showKey)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
+                  {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+            </FieldRow>
+
+            <div className="flex items-center justify-between mt-5">
+              <a href="https://www.perplexity.ai/settings/api" target="_blank" rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-xs text-brand-accent hover:underline">
+                Get a Perplexity API key <ExternalLink size={11} />
+              </a>
+              <SaveButton loading={aiLoading} saved={aiSaved} onClick={handleSaveAI} label="Save & Verify Key" />
+            </div>
           </div>
-          {PROVIDERS.map(p => (
-            <ProviderCard
-              key={p.id}
-              provider={p}
-              config={settings.aiProviders?.[p.id] || {}}
-              onChange={handleProviderChange}
-            />
-          ))}
-        </div>
+
+          {/* Future providers info card */}
+          <div className="card-dark p-4 opacity-60">
+            <div className="flex items-center gap-2 mb-3">
+              <Zap size={14} className="text-slate-500" />
+              <span className="text-xs font-medium text-slate-500">Additional AI Providers — Coming Soon</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {['OpenAI', 'Anthropic Claude', 'Google Gemini', 'Azure OpenAI', 'AWS Bedrock'].map(p => (
+                <span key={p} className="px-2.5 py-1 rounded-lg text-[11px] bg-white/3 border border-white/5 text-slate-600">{p}</span>
+              ))}
+            </div>
+          </div>
+        </motion.div>
       )}
 
-      {activeTab === 'app' && (
-        <div className="card-dark p-5">
-          <h3 className="font-heading font-semibold text-white mb-4">App Access</h3>
-          <div className="space-y-2 text-xs text-slate-500">
-            <div className="flex gap-2"><span className="text-slate-600 w-32">Admin Email:</span><span className="font-mono text-slate-400">{import.meta.env.VITE_ADMIN_EMAIL || 'Set via APP_ADMIN_EMAIL env var'}</span></div>
-            <div className="flex gap-2"><span className="text-slate-600 w-32">Auth Method:</span><span className="font-mono text-slate-400">JWT (24h expiry)</span></div>
-            <div className="flex gap-2"><span className="text-slate-600 w-32">SSO:</span><span className="font-mono text-slate-400">Future-ready (Auth0 scaffold)</span></div>
+      {/* Account */}
+      {activeTab === 'account' && (
+        <motion.div key="account" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="card-dark p-6">
+          <div className="flex items-center gap-3 mb-5">
+            <div className="w-10 h-10 rounded-xl bg-brand-primary/15 flex items-center justify-center">
+              <User size={20} className="text-brand-primary" />
+            </div>
+            <div>
+              <div className="font-heading font-semibold text-white">Your Account</div>
+              <div className="text-xs text-slate-500">Update your sign-in credentials</div>
+            </div>
           </div>
-          <div className="mt-4 p-3 rounded-lg bg-amber-950/20 border border-amber-900/20 text-xs text-amber-400">
-            App credentials are configured via environment variables (APP_ADMIN_EMAIL, APP_ADMIN_PASSWORD). To change them, update your Railway env and redeploy.
+
+          {accountError && (
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-red-950/50 border border-red-900/50 text-red-400 text-sm mb-4">
+              <AlertCircle size={14} />{accountError}
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <FieldRow label="Email Address">
+              <input type="email" value={newEmail} onChange={e => setNewEmail(e.target.value)} className="input-dark" />
+            </FieldRow>
+
+            <FieldRow label="New Password" hint="Leave blank to keep your current password.">
+              <div className="relative">
+                <input type={showNewPass ? 'text' : 'password'} value={newPassword} onChange={e => setNewPassword(e.target.value)} className="input-dark pr-10" placeholder="New password (optional)" />
+                <button type="button" onClick={() => setShowNewPass(!showNewPass)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500">
+                  {showNewPass ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+            </FieldRow>
+
+            {newPassword && (
+              <FieldRow label="Confirm New Password">
+                <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} className="input-dark" placeholder="Type new password again" />
+              </FieldRow>
+            )}
           </div>
-        </div>
+
+          <div className="flex items-center gap-2 p-3 rounded-lg bg-white/3 border border-white/5 text-xs text-slate-500 mt-5 mb-5">
+            <Lock size={12} className="text-brand-primary flex-shrink-0" />
+            Changes take effect on your next sign-in.
+          </div>
+
+          <div className="flex justify-end">
+            <SaveButton loading={accountLoading} saved={accountSaved} onClick={handleSaveAccount} />
+          </div>
+        </motion.div>
       )}
 
-      {activeTab === 'workspace' && (
-        <div className="card-dark p-5">
-          <h3 className="font-heading font-semibold text-white mb-4">Active Workspace</h3>
-          <p className="text-xs text-slate-500 mb-4">Workspace state is persisted server-side in <span className="font-mono">backend/data/workspace.json</span>. Use the Reset Program button in the sidebar to start a new session.</p>
-          <div className="space-y-2 text-xs">
-            <div className="flex gap-2"><span className="text-slate-600 w-36">Persistence:</span><span className="text-slate-400">Server-side JSON</span></div>
-            <div className="flex gap-2"><span className="text-slate-600 w-36">History:</span><span className="text-slate-400">Last 20 sessions preserved after reset</span></div>
-            <div className="flex gap-2"><span className="text-slate-600 w-36">Reset behavior:</span><span className="text-slate-400">Clears session state only — OT artifacts NOT deleted</span></div>
-            <div className="flex gap-2"><span className="text-slate-600 w-36">Parent Org:</span><span className="font-mono text-brand-gold">Meszaros - Do Not Touch</span></div>
+      {/* OneTrust */}
+      {activeTab === 'onetrust' && (
+        <motion.div key="onetrust" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="card-dark p-6">
+          <div className="flex items-center gap-3 mb-5">
+            <div className="w-10 h-10 rounded-xl bg-brand-gold/15 flex items-center justify-center">
+              <Shield size={20} className="text-brand-gold" />
+            </div>
+            <div>
+              <div className="font-heading font-semibold text-white">OneTrust Connection</div>
+              <div className="text-xs text-slate-500">Default credentials used when starting new implementations</div>
+            </div>
           </div>
-        </div>
-      )}
 
-      {/* Save */}
-      {activeTab === 'ai' && (
-        <div className="mt-6 flex justify-end">
-          <button onClick={handleSave} disabled={saving} className="btn-primary">
-            {saving ? <><Loader2 size={15} className="animate-spin" />Saving...</> :
-             saved ? <><CheckCircle2 size={15} className="text-green-400" />Saved!</> :
-             <><Save size={15} />Save Settings</>}
-          </button>
-        </div>
+          <div className="flex items-start gap-2 p-3 rounded-lg bg-brand-primary/5 border border-brand-primary/15 text-xs text-slate-400 mb-5">
+            <Info size={12} className="text-brand-primary mt-0.5 flex-shrink-0" />
+            <span>You can also enter credentials fresh each time you start a new implementation — these are just defaults to save you time.</span>
+          </div>
+
+          {otError && (
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-red-950/50 border border-red-900/50 text-red-400 text-sm mb-4">
+              <AlertCircle size={14} />{otError}
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <FieldRow label="OneTrust URL">
+              <input value={otBaseUrl} onChange={e => setOtBaseUrl(e.target.value)} className="input-dark font-mono text-xs" />
+            </FieldRow>
+            <FieldRow label="Client ID" hint="Found in your OneTrust OAuth application settings.">
+              <input value={otClientId} onChange={e => setOtClientId(e.target.value)} className="input-dark font-mono text-xs" placeholder="your-client-id" />
+            </FieldRow>
+            <FieldRow label="Client Secret">
+              <div className="relative">
+                <input type={showOtSecret ? 'text' : 'password'} value={otClientSecret} onChange={e => setOtClientSecret(e.target.value)} className="input-dark font-mono text-xs pr-10" placeholder="your-client-secret" />
+                <button type="button" onClick={() => setShowOtSecret(!showOtSecret)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500">
+                  {showOtSecret ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+            </FieldRow>
+          </div>
+
+          <div className="flex justify-end mt-5">
+            <SaveButton loading={otLoading} saved={otSaved} onClick={handleSaveOT} />
+          </div>
+        </motion.div>
       )}
     </div>
   );

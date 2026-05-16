@@ -2,29 +2,33 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const router = express.Router();
-
-const ADMIN_EMAIL = process.env.APP_ADMIN_EMAIL || 'admin@zerotrust.ai';
-const ADMIN_PASSWORD_HASH = process.env.APP_ADMIN_PASSWORD
-  ? bcrypt.hashSync(process.env.APP_ADMIN_PASSWORD, 10)
-  : bcrypt.hashSync('ZeroTrust2025!', 10);
-
-const SECRET = process.env.APP_SESSION_SECRET || 'zerotrust-dev-secret';
+const ConfigModel = require('../models/config');
 
 // POST /api/app/login
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
-  if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+  if (!email || !password) return res.status(400).json({ error: 'Email and password are required.' });
 
-  const emailMatch = email.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-  const passMatch = await bcrypt.compare(password, ADMIN_PASSWORD_HASH);
+  const cfg = ConfigModel.get();
+  const secret = cfg.sessionSecret || 'zerotrust-default-secret';
+
+  // Match email (case-insensitive)
+  const emailMatch = email.toLowerCase() === (cfg.adminEmail || '').toLowerCase();
+
+  // Match password — stored as plain in config (bcrypt on compare)
+  let passMatch = false;
+  if (cfg.adminPassword) {
+    // Try plain comparison first (UI-set), then bcrypt
+    passMatch = password === cfg.adminPassword || await bcrypt.compare(password, cfg.adminPassword).catch(() => false);
+  }
 
   if (!emailMatch || !passMatch) {
-    return res.status(401).json({ error: 'Invalid credentials' });
+    return res.status(401).json({ error: 'Incorrect email or password.' });
   }
 
   const token = jwt.sign(
     { email, role: 'admin', app: 'zerotrust-ai' },
-    SECRET,
+    secret,
     { expiresIn: '24h' }
   );
 
@@ -35,11 +39,13 @@ router.post('/login', async (req, res) => {
 router.get('/session', (req, res) => {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) return res.status(401).json({ error: 'Not authenticated' });
+  const cfg = ConfigModel.get();
+  const secret = cfg.sessionSecret || 'zerotrust-default-secret';
   try {
-    const decoded = jwt.verify(authHeader.split(' ')[1], SECRET);
+    const decoded = jwt.verify(authHeader.split(' ')[1], secret);
     res.json({ valid: true, user: decoded });
   } catch {
-    res.status(401).json({ valid: false, error: 'Invalid or expired token' });
+    res.status(401).json({ valid: false, error: 'Session expired. Please sign in again.' });
   }
 });
 

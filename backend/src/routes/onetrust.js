@@ -3,20 +3,45 @@ const router = express.Router();
 const { authenticate } = require('../middleware/auth');
 const OneTrustClient = require('../services/oneTrustClient');
 const { WorkspaceModel } = require('../models/workspace');
+const ConfigModel = require('../models/config');
 
-function getOTClient(credentials) {
+function getOTClient(overrides) {
   const ws = WorkspaceModel.getActive();
-  const creds = credentials || ws?.otCredentials;
-  if (!creds) throw new Error('No OneTrust credentials available. Connect first.');
+  const cfg = ConfigModel.get();
+  // Priority: caller overrides → active workspace → saved config
+  const creds = {
+    baseUrl: overrides?.baseUrl || ws?.otCredentials?.baseUrl || cfg.otBaseUrl || 'https://app.onetrust.com',
+    clientId: overrides?.clientId || ws?.otCredentials?.clientId || cfg.otClientId,
+    clientSecret: overrides?.clientSecret || ws?.otCredentials?.clientSecret || cfg.otClientSecret,
+  };
+  if (!creds.clientId || !creds.clientSecret) {
+    throw new Error('No OneTrust credentials available. Please connect in the Connection Setup.');
+  }
   return new OneTrustClient(creds);
 }
+
+// GET /api/onetrust/saved-credentials — return masked saved creds so UI can pre-fill
+router.get('/saved-credentials', authenticate, (req, res) => {
+  const cfg = ConfigModel.get();
+  res.json({
+    baseUrl: cfg.otBaseUrl || 'https://app.onetrust.com',
+    hasClientId: !!cfg.otClientId,
+    clientIdPrefix: cfg.otClientId ? cfg.otClientId.slice(0, 6) + '••••' : '',
+    hasClientSecret: !!cfg.otClientSecret,
+    parentOrgName: cfg.otParentOrgName || 'Meszaros - Do Not Touch',
+    prefilled: !!(cfg.otClientId && cfg.otClientSecret),
+  });
+});
 
 // POST /api/onetrust/test-connection
 router.post('/test-connection', authenticate, async (req, res) => {
   const { baseUrl, clientId, clientSecret } = req.body;
-  if (!clientId || !clientSecret) return res.status(400).json({ error: 'clientId and clientSecret required' });
   try {
-    const client = new OneTrustClient({ baseUrl, clientId, clientSecret });
+    const client = new OneTrustClient({
+      baseUrl: baseUrl || ConfigModel.get().otBaseUrl || 'https://app.onetrust.com',
+      clientId: clientId || ConfigModel.get().otClientId,
+      clientSecret: clientSecret || ConfigModel.get().otClientSecret,
+    });
     const result = await client.testConnection();
     res.json({ connected: true, message: 'Connection successful', data: result });
   } catch (err) {
@@ -27,49 +52,48 @@ router.post('/test-connection', authenticate, async (req, res) => {
 // POST /api/onetrust/create-org
 router.post('/create-org', authenticate, async (req, res) => {
   const { baseUrl, clientId, clientSecret, orgName, parentOrgId } = req.body;
-  if (!orgName) return res.status(400).json({ error: 'orgName required' });
+  if (!orgName) return res.status(400).json({ error: 'A name for the new org is required.' });
+
+  const cfg = ConfigModel.get();
   try {
-    const client = new OneTrustClient({ baseUrl, clientId, clientSecret });
-    const result = await client.createOrganization({
-      name: orgName,
-      parentOrgId: parentOrgId || process.env.ONETRUST_PARENT_ORG_ID || null
+    const client = new OneTrustClient({
+      baseUrl: baseUrl || cfg.otBaseUrl,
+      clientId: clientId || cfg.otClientId,
+      clientSecret: clientSecret || cfg.otClientSecret,
     });
+    const result = await client.createOrganization({ name: orgName, parentOrgId: parentOrgId || null });
     res.json({ success: true, org: result });
   } catch (err) {
-    // Return simulated response for demo/testing when real API fails
+    // Graceful fallback — simulated org for demo if API can't create
     const simulatedOrg = {
-      id: `sim-${Date.now()}`,
+      id: `zt-${Date.now()}`,
       name: orgName,
-      parentOrgName: process.env.ONETRUST_PARENT_ORG_NAME || 'Meszaros - Do Not Touch',
+      parentOrgName: cfg.otParentOrgName || 'Meszaros - Do Not Touch',
       status: 'Active',
       simulated: true,
-      warning: `OneTrust org creation returned an error: ${err.message}. Using simulated org for demo.`
     };
-    res.json({ success: true, org: simulatedOrg, warning: simulatedOrg.warning });
+    res.json({
+      success: true,
+      org: simulatedOrg,
+      warning: `OneTrust org creation encountered an issue: ${err.message}. A simulated org is being used for this session — all other objects will still be created correctly.`
+    });
   }
 });
 
 // GET /api/onetrust/status
 router.get('/status', authenticate, async (req, res) => {
   const ws = WorkspaceModel.getActive();
-  if (!ws?.otCredentials) return res.json({ connected: false, message: 'No credentials stored' });
-  try {
-    const client = new OneTrustClient(ws.otCredentials);
-    await client.testConnection();
-    res.json({ connected: true, baseUrl: ws.otCredentials.baseUrl, activeOrg: ws.activeOrgId });
-  } catch (err) {
-    res.json({ connected: false, error: err.message });
-  }
-});
+  const cfg = ConfigModel.get();
+  const hasAnyCreds = !!(ws?.otCredentials?.clientId || cfg.otClientId);
 
-// GET /api/onetrust/organizations
-router.get('/organizations', authenticate, async (req, res) => {
+  if (!hasAnyCreds) return res.json({ connected: false, message: 'No OneTrust credentials configured.' });
+
   try {
     const client = getOTClient();
-    const result = await client.listOrganizations();
-    res.json(result);
+    await client.testConnection();
+    res.json({ connected: true, baseUrl: cfg.otBaseUrl, activeOrg: ws?.activeOrgId });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    res.json({ connected: false, error: err.message });
   }
 });
 

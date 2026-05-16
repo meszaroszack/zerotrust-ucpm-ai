@@ -1,36 +1,34 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../middleware/auth');
-const { SettingsModel } = require('../models/workspace');
+const ConfigModel = require('../models/config');
 
-// GET /api/settings
+// GET /api/settings — return safe (masked) config
 router.get('/', authenticate, (req, res) => {
-  const settings = SettingsModel.get();
-  // Mask API keys in response
-  const masked = JSON.parse(JSON.stringify(settings));
-  if (masked.aiProviders) {
-    Object.keys(masked.aiProviders).forEach(k => {
-      if (masked.aiProviders[k].apiKey) masked.aiProviders[k].apiKey = '***masked***';
-    });
-  }
-  res.json(masked);
+  const cfg = ConfigModel.get();
+  res.json({
+    ai: {
+      provider: 'perplexity',
+      hasKey: !!cfg.perplexityApiKey,
+      model: cfg.perplexityModel,
+    },
+    onetrust: {
+      baseUrl: cfg.otBaseUrl,
+      hasClientId: !!cfg.otClientId,
+      hasClientSecret: !!cfg.otClientSecret,
+      parentOrgName: cfg.otParentOrgName,
+    },
+    admin: {
+      email: cfg.adminEmail,
+    },
+    setupComplete: cfg.setupComplete,
+  });
 });
 
-// POST /api/settings
+// POST /api/settings — generic save (accepts any subset)
 router.post('/', authenticate, (req, res) => {
-  const current = SettingsModel.get();
-  // Merge carefully - preserve existing masked keys if new value is masked
-  const updates = req.body;
-  if (updates.aiProviders) {
-    Object.keys(updates.aiProviders).forEach(k => {
-      if (updates.aiProviders[k].apiKey === '***masked***') {
-        updates.aiProviders[k].apiKey = current.aiProviders?.[k]?.apiKey || '';
-      }
-    });
-  }
-  const merged = { ...current, ...updates, aiProviders: { ...current.aiProviders, ...updates.aiProviders } };
-  SettingsModel.save(merged);
-  res.json({ success: true, message: 'Settings saved' });
+  ConfigModel.save(req.body);
+  res.json({ success: true });
 });
 
 module.exports = router;

@@ -121,9 +121,10 @@ export default function LoginPage() {
           </form>
         </div>
 
-        <p className="text-center text-slate-600 text-xs mt-6">
-          Beta access only. Connects to real OneTrust testing environment.
-        </p>
+        <div className="text-center mt-6 space-y-2">
+          <p className="text-slate-600 text-xs">ZEROTRUST AI · Beta</p>
+          <a href="/setup" className="text-xs text-slate-700 hover:text-slate-500 transition-colors">First time? Set up your account →</a>
+        </div>
       </motion.div>
     </div>
   );
