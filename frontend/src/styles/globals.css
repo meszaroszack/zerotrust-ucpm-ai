@@ -1,0 +1,143 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+
+  :root {
+    --primary: #0B5FFF;
+    --secondary: #0F172A;
+    --accent: #14B8A6;
+    --gold: #D4A72C;
+    --success: #15803D;
+    --warning: #B45309;
+    --error: #B91C1C;
+    --border: rgba(15,23,42,0.10);
+    --border-dark: rgba(255,255,255,0.08);
+    --text: #0F172A;
+    --muted: #475569;
+  }
+
+  html { font-family: 'Inter', sans-serif; }
+  
+  h1, h2, h3, h4 { font-family: 'Inter Tight', 'Inter', sans-serif; }
+
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+  ::selection { background: rgba(11,95,255,0.3); }
+}
+
+@layer components {
+  .glass {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.08);
+    backdrop-filter: blur(12px);
+  }
+
+  .glass-light {
+    background: rgba(255,255,255,0.8);
+    border: 1px solid rgba(15,23,42,0.08);
+    backdrop-filter: blur(12px);
+  }
+
+  .card-dark {
+    background: #0F172A;
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 12px;
+  }
+
+  .card-light {
+    background: #FFFFFF;
+    border: 1px solid rgba(15,23,42,0.08);
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+
+  .btn-primary {
+    @apply bg-brand-primary hover:bg-blue-600 text-white font-medium px-5 py-2.5 rounded-lg 
+           transition-all duration-200 flex items-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply bg-white/5 hover:bg-white/10 border border-white/10 text-white font-medium px-5 py-2.5 rounded-lg 
+           transition-all duration-200 flex items-center gap-2 text-sm disabled:opacity-50;
+  }
+
+  .btn-accent {
+    @apply bg-brand-accent hover:bg-teal-500 text-white font-medium px-5 py-2.5 rounded-lg 
+           transition-all duration-200 flex items-center gap-2 text-sm;
+  }
+
+  .btn-ghost {
+    @apply text-slate-400 hover:text-white hover:bg-white/5 px-3 py-2 rounded-lg 
+           transition-all duration-200 flex items-center gap-2 text-sm;
+  }
+
+  .input-dark {
+    @apply w-full bg-white/5 border border-white/10 rounded-lg px-4 py-2.5 text-white 
+           placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-primary/50 
+           focus:border-brand-primary text-sm transition-all duration-200;
+  }
+
+  .label-dark {
+    @apply block text-xs font-medium text-slate-400 mb-1.5 uppercase tracking-wider;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .status-dot {
+    @apply inline-block w-2 h-2 rounded-full;
+  }
+
+  .section-header {
+    @apply text-xs font-semibold text-slate-500 uppercase tracking-widest mb-3;
+  }
+
+  .mono { font-family: 'JetBrains Mono', 'IBM Plex Mono', monospace; }
+
+  .confidence-high { @apply text-brand-success bg-green-950 border-green-800; }
+  .confidence-medium { @apply text-yellow-400 bg-yellow-950 border-yellow-800; }
+  .confidence-low { @apply text-brand-error bg-red-950 border-red-900; }
+
+  .geo-chip {
+    @apply inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-mono font-medium
+           bg-slate-800 border border-slate-700 text-slate-300;
+  }
+
+  .posture-opt-in { @apply bg-blue-950 border-blue-800 text-blue-300; }
+  .posture-opt-out { @apply bg-amber-950 border-amber-800 text-amber-300; }
+  .posture-notice { @apply bg-slate-800 border-slate-700 text-slate-300; }
+  .posture-legit { @apply bg-purple-950 border-purple-800 text-purple-300; }
+}
+
+@layer utilities {
+  .text-gradient {
+    background: linear-gradient(135deg, #0B5FFF, #14B8A6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .border-gradient {
+    border-image: linear-gradient(135deg, #0B5FFF22, #14B8A622) 1;
+  }
+
+  .animate-fade-in { animation: fadeIn 0.3s ease-in-out; }
+  .animate-slide-up { animation: slideUp 0.4s ease-out; }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}
