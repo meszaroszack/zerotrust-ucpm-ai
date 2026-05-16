@@ -60,17 +60,23 @@ router.post('/', authenticate, async (req, res) => {
           locale: locale || 'en',
           organizationId: ws.activeOrgId,
         });
-        const otId = result.id || result.collectionPointId || result.data?.id;
-        cp.createStatus = 'created';
-        cp.oneTrustId = otId;
-        cp.lastError = null;
-        otLog('create:success', { name, otId });
-        WorkspaceModel.addArtifact({ type: 'collectionPoint', name, otId, region, locale });
-        WorkspaceModel.addChange({ action: 'create', objectType: 'collectionPoint', name, otId });
+        const otId = result._resolvedId;
+        if (!otId) {
+          cp.createStatus = 'failed';
+          cp.lastError = 'OneTrust returned success but no collection point ID in response. Check Railway logs for full OT response.';
+          otLog('create:no-id', { name, response: JSON.stringify(result).slice(0, 300) });
+        } else {
+          cp.createStatus = 'created';
+          cp.oneTrustId = otId;
+          cp.lastError = null;
+          otLog('create:success', { name, otId, region, locale });
+          WorkspaceModel.addArtifact({ type: 'collectionPoint', name, otId, region, locale });
+          WorkspaceModel.addChange({ action: 'create', objectType: 'collectionPoint', name, otId });
+        }
       } catch (err) {
         cp.createStatus = 'failed';
         cp.lastError = err.message;
-        otLog('create:failed', { name, error: err.message });
+        otLog('create:failed', { name, error: err.message, otBody: err.otBody, otUrl: err.otUrl });
       }
     }
   }
@@ -130,13 +136,19 @@ router.patch('/:id', authenticate, async (req, res) => {
             locale: updated.locale || 'en',
             organizationId: ws.activeOrgId,
           });
-          const otId = result.id || result.collectionPointId || result.data?.id;
-          updated.createStatus = 'created';
-          updated.oneTrustId = otId;
-          updated.lastError = null;
-          otLog('create:success', { name: updated.name, otId });
-          WorkspaceModel.addArtifact({ type: 'collectionPoint', name: updated.name, otId });
-          WorkspaceModel.addChange({ action: 'create', objectType: 'collectionPoint', name: updated.name, otId });
+          const otId = result._resolvedId;
+          if (!otId) {
+            updated.createStatus = 'failed';
+            updated.lastError = 'OneTrust returned success but no collection point ID in response. Check Railway logs.';
+            otLog('create:no-id', { name: updated.name });
+          } else {
+            updated.createStatus = 'created';
+            updated.oneTrustId = otId;
+            updated.lastError = null;
+            otLog('create:success', { name: updated.name, otId });
+            WorkspaceModel.addArtifact({ type: 'collectionPoint', name: updated.name, otId });
+            WorkspaceModel.addChange({ action: 'create', objectType: 'collectionPoint', name: updated.name, otId });
+          }
         } else {
           await client.updateCollectionPoint(updated.oneTrustId, {
             name: updated.name,

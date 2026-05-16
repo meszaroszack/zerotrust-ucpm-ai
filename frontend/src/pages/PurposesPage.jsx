@@ -17,8 +17,9 @@ const LEGAL_BASIS = ['consent', 'legitimate-interest', 'contract', 'legal-obliga
 const DE_CATEGORIES = ['personal', 'sensitive', 'special-category', 'financial', 'biometric', 'location', 'behavioral', 'device', 'other'];
 
 // ── Execution status badge ────────────────────────────────────────────────────
+// 5-state execution badge: suggested → local → pushing → created | failed
 function ExecBadge({ obj }) {
-  const s = obj.createStatus;
+  const s = obj?.createStatus;
   if (s === 'created') return (
     <span className="inline-flex items-center gap-1 badge bg-green-950 border-green-800 text-green-400 text-[10px]">
       <CheckCircle2 size={10} />In OneTrust
@@ -32,13 +33,22 @@ function ExecBadge({ obj }) {
   );
   if (s === 'failed') return (
     <span className="inline-flex items-center gap-1 badge bg-red-950 border-red-800 text-red-400 text-[10px]" title={obj.lastError}>
-      <XCircle size={10} />Failed
+      <XCircle size={10} />Push Failed
     </span>
   );
-  // local / undefined
+  if (s === 'suggested') return (
+    <span className="inline-flex items-center gap-1 badge bg-purple-950 border-purple-800 text-purple-400 text-[10px]">
+      AI Suggested
+    </span>
+  );
+  if (s === 'local') return (
+    <span className="inline-flex items-center gap-1 badge bg-slate-800 border-slate-700 text-slate-400 text-[10px]">
+      Saved Locally
+    </span>
+  );
   return (
     <span className="inline-flex items-center gap-1 badge bg-slate-800 border-slate-700 text-slate-400 text-[10px]">
-      AI Draft
+      {s || 'Draft'}
     </span>
   );
 }
@@ -109,6 +119,7 @@ function PurposeCard({ purpose, onUpdate, simulated }) {
     try { await onUpdate(purpose.id, { createInOT: true }); } finally { setPushing(false); }
   };
 
+  // Allow push from: suggested, local, failed (retry). Block from: created, pushing.
   const canPush = !simulated && purpose.createStatus !== 'created' && purpose.createStatus !== 'pushing';
   const hasFailed = purpose.createStatus === 'failed';
 

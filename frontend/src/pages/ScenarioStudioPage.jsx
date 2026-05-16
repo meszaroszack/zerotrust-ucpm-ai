@@ -21,12 +21,13 @@ const FLAG_MAP = {
 };
 
 // ── Execution badge ────────────────────────────────────────────────────────────
+// 5-state execution badge for collection points
 function ExecBadge({ obj }) {
   const s = obj?.createStatus;
   if (s === 'created') return (
     <span className="inline-flex items-center gap-1 badge bg-green-950 border-green-800 text-green-400 text-[10px]">
-      <CheckCircle2 size={10} />CP in OT
-      {obj.oneTrustId && <span className="font-mono opacity-60 ml-0.5">{obj.oneTrustId.slice(0, 8)}…</span>}
+      <CheckCircle2 size={10} />CP in OneTrust
+      {obj?.oneTrustId && <span className="font-mono opacity-60 ml-0.5">{obj.oneTrustId.slice(0, 8)}…</span>}
     </span>
   );
   if (s === 'pushing') return (
@@ -35,8 +36,13 @@ function ExecBadge({ obj }) {
     </span>
   );
   if (s === 'failed') return (
-    <span className="inline-flex items-center gap-1 badge bg-red-950 border-red-800 text-red-400 text-[10px]">
-      <XCircle size={10} />Failed
+    <span className="inline-flex items-center gap-1 badge bg-red-950 border-red-800 text-red-400 text-[10px]" title={obj?.lastError}>
+      <XCircle size={10} />Push Failed
+    </span>
+  );
+  if (s === 'suggested') return (
+    <span className="inline-flex items-center gap-1 badge bg-purple-950 border-purple-800 text-purple-400 text-[10px]">
+      AI Suggested
     </span>
   );
   return null;

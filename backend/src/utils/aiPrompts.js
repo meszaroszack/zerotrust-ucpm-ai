@@ -2,152 +2,405 @@
  * AI Prompt Templates for ZEROTRUST AI
  *
  * CONTRACT: Every prompt instructs the model to return ONLY a JSON object
- * inside a ```json code block. No prose before or after. The provider will
- * throw (not silently wrap) if this contract is violated.
+ * inside a ```json code block. No prose before or after.
+ *
+ * Design principle:
+ *   - classify-first prompts: AI maps input to canonical IDs from the ontology
+ *   - rationale-only prompts: AI adds reasoning text to deterministic outputs
+ *   - free-form generation only for custom objects outside the ontology
+ *
+ * Prompts are deliberately SHORT and STRUCTURED to minimize AI prose risk.
  */
 
+const { PURPOSES, DATA_ELEMENTS, CP_ARCHETYPES, CONSENT_MODELS } = require('../data/privacyOntology');
+
 const BASE_SYSTEM =
-`You are ZEROTRUST AI — an expert privacy implementation officer specializing in OneTrust UCPM/CMP deployments.
-You think in scenarios, not in menus. Your job is to translate business requirements into actionable privacy program implementations.
+`You are ZEROTRUST AI — a privacy implementation specialist for OneTrust UCPM/CMP deployments.
+CRITICAL OUTPUT RULE: Respond with ONLY a single JSON object inside a \`\`\`json code block. Zero prose before or after. Any text outside the JSON block causes a parse failure and discards your response.`;
 
-CRITICAL OUTPUT RULE: Respond with ONLY a single JSON object inside a \`\`\`json code block. No prose, no explanation, no text before or after the code block. This is a machine-readable API — any text outside the JSON will cause a parse failure.
+const JSON_REMINDER = '\n\nRespond with ONLY a ```json code block. No other text whatsoever.';
 
-Every response must include these base keys: title (string), summary (string), confidence ("high"|"medium"|"low"), assumptions (array of strings), warnings (array of strings), recommendations (array of strings), missingInputs (array of strings), humanReviewFlags (array of strings).
-
-Note: This is regulatory-informed implementation guidance, not legal advice. Flag anything requiring human or legal review in humanReviewFlags.`;
-
-const JSON_REMINDER = 'Respond with ONLY a ```json code block. No other text.';
+// Pre-serialize ontology for prompt injection (compact)
+const PURPOSE_IDS = PURPOSES.map(p => p.id);
+const DE_IDS = DATA_ELEMENTS.map(d => d.id);
+const CP_IDS = CP_ARCHETYPES.map(c => c.id);
+const REGION_KEYS = Object.keys(CONSENT_MODELS);
 
 const prompts = {
+
+  // ── Intake document: extract structured program facts ──────────────────────
   intakeDocument(content) {
     return {
       systemPrompt: BASE_SYSTEM,
       userMessage:
-`Analyze this document and extract all privacy program requirements:
+`Analyze the following privacy program requirements and extract structured facts.
 
+INPUT:
 ${content}
 
-Return JSON with: title, summary, confidence, extractedContext (object with: businessModel, industry, websiteFootprint, regionsServed, languagesNeeded, purposes, dataElements, collectionPointScenarios, complianceFrameworks, marketingPresence, analyticsPresence, knownConcerns), assumptions, warnings, missingInputs, humanReviewFlags, recommendations.
-
+Return a JSON object with exactly these keys:
+{
+  "title": string,
+  "summary": string (1-2 sentences),
+  "confidence": "high"|"medium"|"low",
+  "extractedContext": {
+    "businessModel": string,
+    "industry": string,
+    "websiteFootprint": string,
+    "regionsServed": [string],
+    "languagesNeeded": [string],
+    "purposes": string (comma-separated list from input),
+    "dataElements": string (comma-separated list from input),
+    "collectionPointScenarios": string,
+    "complianceFrameworks": [string],
+    "marketingPresence": string,
+    "analyticsPresence": string,
+    "knownConcerns": string
+  },
+  "assumptions": [string],
+  "warnings": [string],
+  "missingInputs": [string],
+  "humanReviewFlags": [string],
+  "recommendations": [string]
+}
 ${JSON_REMINDER}`
     };
   },
 
+  // ── Follow-up questions: gap-fill for program planning ────────────────────
   askFollowups(context) {
+    const contextStr = JSON.stringify({
+      businessModel: context?.businessModel,
+      industry: context?.industry,
+      regionsServed: context?.extractedContext?.regionsServed || context?.regionsServed,
+      purposes: context?.extractedContext?.purposes || context?.purposes,
+      complianceFrameworks: context?.extractedContext?.complianceFrameworks,
+      knownConcerns: context?.extractedContext?.knownConcerns,
+    });
     return {
       systemPrompt: BASE_SYSTEM,
       userMessage:
-`Based on this partial context: ${JSON.stringify(context)}
+`Based on this partial program context, generate expert follow-up questions to fill implementation gaps.
 
-Generate targeted expert follow-up questions that will fill the gaps needed to build a complete OneTrust consent program.
+CONTEXT: ${contextStr}
 
-Return JSON with: title, summary, confidence, questions (array of objects — each with: id (string), question (string), category (one of: geography|business|dataCapture|languages|formTypes|marketing|regulatory|profiling), required (bool), helpText (string), options (array of strings or null)), assumptions, warnings, missingInputs, humanReviewFlags, recommendations.
+Return JSON with:
+{
+  "title": string,
+  "summary": string,
+  "confidence": "high"|"medium"|"low",
+  "questions": [
+    {
+      "id": string (e.g. "q1"),
+      "question": string,
+      "category": "geography"|"business"|"dataCapture"|"languages"|"formTypes"|"marketing"|"regulatory"|"profiling",
+      "required": boolean,
+      "helpText": string,
+      "options": [string] or null,
+      "multiSelect": boolean
+    }
+  ],
+  "assumptions": [string],
+  "warnings": [string],
+  "missingInputs": [string],
+  "humanReviewFlags": [string],
+  "recommendations": [string]
+}
 
-The questions array must have at least 3 items and no more than 12.
-
+Rules:
+- 4 to 10 questions only
+- Every question with "options" must have multiSelect: true or false
+- Options must be concrete values (e.g. ["Germany", "France", "UK"]) not meta-choices
+- Geography and regulatory questions must always include options
 ${JSON_REMINDER}`
     };
   },
 
+  // ── Extract program: classify input into canonical IDs ────────────────────
+  // This prompt ONLY asks AI to select from known IDs — no free-form generation.
   extractProgram(context) {
+    const contextStr = JSON.stringify(context || {}).slice(0, 4000);
     return {
       systemPrompt: BASE_SYSTEM,
       userMessage:
-`Given this brand/program context: ${JSON.stringify(context)}
+`Classify this business context into canonical privacy program components.
 
-Generate a complete privacy program model. Return JSON with: title, summary, confidence, purposes (array of {name, description, legalBasis, regions, required, confidence}), dataElements (array of {name, description, category, sensitive, linkedPurposes, confidence}), collectionPointScenarios (array of {name, region, country, state, language, consentPosture, cpType, purposes, dataElements, rationale}), geoStrategy, languageStrategy, implementationPhases (array of strings), assumptions, warnings, humanReviewFlags, missingInputs, recommendations.
+CONTEXT: ${contextStr}
 
+Available purpose IDs: ${JSON.stringify(PURPOSE_IDS)}
+Available data element IDs: ${JSON.stringify(DE_IDS)}
+Available region keys: ${JSON.stringify(REGION_KEYS)}
+Available CP archetype IDs: ${JSON.stringify(CP_IDS)}
+
+Return JSON with:
+{
+  "title": string,
+  "summary": string,
+  "confidence": "high"|"medium"|"low",
+  "classifiedPurposeIds": [string],
+  "classifiedDeIds": [string],
+  "classifiedRegions": [string],
+  "classifiedCpIds": [string],
+  "customPurposes": [{"name": string, "description": string, "legalBasis": "consent"|"legitimate-interest"|"contract"|"legal-obligation"|"vital-interests"|"public-task", "reasoning": string}],
+  "customDataElements": [{"name": string, "description": string, "category": string, "sensitive": boolean, "reasoning": string}],
+  "geoStrategy": string,
+  "implementationPhases": [string],
+  "assumptions": [string],
+  "warnings": [string],
+  "humanReviewFlags": [string],
+  "missingInputs": [string],
+  "recommendations": [string]
+}
+
+RULES:
+- classifiedPurposeIds must only contain IDs from the provided list
+- classifiedDeIds must only contain IDs from the provided list
+- classifiedRegions must only contain keys from the provided list
+- classifiedCpIds must only contain IDs from the provided list
+- Only add customPurposes/customDataElements for genuine cases NOT covered by canonical IDs
 ${JSON_REMINDER}`
     };
   },
 
-  generateScenarios(context) {
+  // ── Generate scenarios: rationale only, no structure generation ───────────
+  // The deterministic engine already built the scenarios.
+  // AI adds rationale text and priority adjustments only.
+  enrichScenarioRationale(scenarios) {
     return {
       systemPrompt: BASE_SYSTEM,
       userMessage:
-`Given this program context: ${JSON.stringify(context)}
+`The following scenarios were generated by a deterministic rules engine. Add rationale text and priority adjustments only. Do not change structure, IDs, region codes, or consent postures.
 
-Generate a complete scenario matrix. Return JSON with: title, summary, confidence, scenarios (array of {id, name, region, country, countryCode, state, stateCode, language, languageCode, consentPosture (opt-in|opt-out|notice-only|legitimate-interest), cpType (dynamic|standard|multi), purposes (array of strings), dataElements (array of strings), oneTrustObjectType, testUrl, rationale, priority, status: "pending"}), assumptions, warnings, humanReviewFlags, missingInputs, recommendations.
+SCENARIOS: ${JSON.stringify(scenarios).slice(0, 5000)}
 
+Return JSON with:
+{
+  "enrichedScenarios": [
+    {
+      "id": string (same as input),
+      "rationale": string (1-2 sentence explanation of why this scenario is needed),
+      "priority": "high"|"medium"|"low",
+      "implementationNotes": string
+    }
+  ]
+}
+
+Only return enrichedScenarios for each input scenario. Do not modify any other fields.
 ${JSON_REMINDER}`
     };
   },
 
+  // ── Recommend purposes: classify + rationale, no free-form ───────────────
   recommendPurposes(context) {
+    const contextStr = JSON.stringify(context || {}).slice(0, 4000);
     return {
       systemPrompt: BASE_SYSTEM,
       userMessage:
-`Given this program context: ${JSON.stringify(context)}
+`Classify this business context into canonical purpose IDs and add rationale.
 
-Recommend a purpose taxonomy for OneTrust. Return JSON with: title, summary, confidence, proposedObjects (array of {name, description, legalBasis (consent|legitimate-interest|contract|legal-obligation|vital-interests|public-task), regions (array of strings), required (bool), confidenceScore (number 0-1), reasoning (string), humanReviewRequired (bool)}), assumptions, warnings, humanReviewFlags, missingInputs, recommendations.
+CONTEXT: ${contextStr}
+AVAILABLE PURPOSE IDs: ${JSON.stringify(PURPOSE_IDS)}
 
+Return JSON with:
+{
+  "title": string,
+  "summary": string,
+  "confidence": "high"|"medium"|"low",
+  "classifiedPurposeIds": [string],
+  "purposeRationale": {
+    "<purposeId>": {
+      "reasoning": string,
+      "confidenceScore": number (0.0-1.0),
+      "humanReviewRequired": boolean
+    }
+  },
+  "customPurposes": [
+    {
+      "name": string,
+      "description": string,
+      "legalBasis": "consent"|"legitimate-interest"|"contract"|"legal-obligation"|"vital-interests"|"public-task",
+      "reasoning": string,
+      "confidenceScore": number,
+      "humanReviewRequired": boolean
+    }
+  ],
+  "assumptions": [string],
+  "warnings": [string],
+  "humanReviewFlags": [string],
+  "missingInputs": [string],
+  "recommendations": [string]
+}
+
+RULES:
+- classifiedPurposeIds: only IDs from the provided list
+- customPurposes: only for genuine purposes NOT in canonical list
+- Do not invent purpose IDs
 ${JSON_REMINDER}`
     };
   },
 
+  // ── Recommend data elements: classify + rationale ────────────────────────
   recommendDataElements(context) {
+    const contextStr = JSON.stringify(context || {}).slice(0, 4000);
     return {
       systemPrompt: BASE_SYSTEM,
       userMessage:
-`Given this program context: ${JSON.stringify(context)}
+`Classify this business context into canonical data element IDs and add rationale.
 
-Recommend data elements for OneTrust. Return JSON with: title, summary, confidence, proposedObjects (array of {name, description, category (personal|sensitive|special-category|financial|biometric|location|behavioral|device|other), sensitive (bool), linkedPurposes (array of strings), retentionPeriod (string), confidenceScore (number 0-1), reasoning (string), humanReviewRequired (bool)}), assumptions, warnings, humanReviewFlags, missingInputs, recommendations.
+CONTEXT: ${contextStr}
+AVAILABLE DATA ELEMENT IDs: ${JSON.stringify(DE_IDS)}
 
+Return JSON with:
+{
+  "title": string,
+  "summary": string,
+  "confidence": "high"|"medium"|"low",
+  "classifiedDeIds": [string],
+  "deRationale": {
+    "<deId>": {
+      "reasoning": string,
+      "confidenceScore": number (0.0-1.0),
+      "humanReviewRequired": boolean
+    }
+  },
+  "customDataElements": [
+    {
+      "name": string,
+      "description": string,
+      "category": "personal"|"sensitive"|"special-category"|"financial"|"biometric"|"location"|"behavioral"|"device"|"other",
+      "sensitive": boolean,
+      "reasoning": string,
+      "confidenceScore": number
+    }
+  ],
+  "assumptions": [string],
+  "warnings": [string],
+  "humanReviewFlags": [string],
+  "missingInputs": [string],
+  "recommendations": [string]
+}
+
+RULES:
+- classifiedDeIds: only IDs from the provided list
+- customDataElements: only for data types genuinely NOT in canonical list
 ${JSON_REMINDER}`
     };
   },
 
+  // ── Recommend collection points: classify channels, no free-form ──────────
   recommendCollectionPoints(context) {
+    const contextStr = JSON.stringify(context || {}).slice(0, 4000);
     return {
       systemPrompt: BASE_SYSTEM,
       userMessage:
-`Given this program context and scenarios: ${JSON.stringify(context)}
+`Classify this business context into canonical collection point archetype IDs.
 
-Recommend collection point strategy and object definitions for OneTrust. Return JSON with: title, summary, confidence, proposedObjects (array of {scenarioId (string), name, label, description, cpType (dynamic|standard), locale, region, geoRuleGroup, purposes (array of strings), dataElements (array of strings), consentModel, version: "1.0", confidenceScore (number 0-1), reasoning (string), humanReviewRequired (bool)}), assumptions, warnings, humanReviewFlags, missingInputs, recommendations.
+CONTEXT: ${contextStr}
+AVAILABLE CP ARCHETYPE IDs: ${JSON.stringify(CP_IDS)}
+AVAILABLE REGION KEYS: ${JSON.stringify(REGION_KEYS)}
 
+Return JSON with:
+{
+  "title": string,
+  "summary": string,
+  "confidence": "high"|"medium"|"low",
+  "classifiedCpIds": [string],
+  "classifiedRegions": [string],
+  "cpRationale": {
+    "<cpId>": {
+      "reasoning": string,
+      "confidenceScore": number
+    }
+  },
+  "assumptions": [string],
+  "warnings": [string],
+  "humanReviewFlags": [string],
+  "missingInputs": [string],
+  "recommendations": [string]
+}
+
+RULES:
+- classifiedCpIds: only IDs from the provided list
+- classifiedRegions: only keys from the provided list
 ${JSON_REMINDER}`
     };
   },
 
+  // ── Propose update ─────────────────────────────────────────────────────────
   proposeUpdate(request, currentState) {
     return {
       systemPrompt: BASE_SYSTEM,
       userMessage:
-`Current workspace state: ${JSON.stringify(currentState)}
+`Current workspace state: ${JSON.stringify(currentState).slice(0, 3000)}
+User request: "${request}"
 
-User update request: "${request}"
-
-Propose specific changes. Return JSON with: title, summary, confidence, affectedObjects (array of {type, id, name, currentValue, proposedValue, changeType (add|update|delete)}), diff (string — human-readable description), assumptions, warnings, humanReviewFlags, missingInputs, recommendations, requiresApproval: true.
-
+Propose specific changes. Return JSON:
+{
+  "title": string,
+  "summary": string,
+  "confidence": "high"|"medium"|"low",
+  "affectedObjects": [{"type": string, "id": string, "name": string, "currentValue": string, "proposedValue": string, "changeType": "add"|"update"|"delete"}],
+  "diff": string,
+  "assumptions": [string],
+  "warnings": [string],
+  "humanReviewFlags": [string],
+  "missingInputs": [string],
+  "recommendations": [string],
+  "requiresApproval": true
+}
 ${JSON_REMINDER}`
     };
   },
 
+  // ── Explain plan ───────────────────────────────────────────────────────────
   explainPlan(plan) {
     return {
       systemPrompt: BASE_SYSTEM,
       userMessage:
-`Explain this implementation plan in detail: ${JSON.stringify(plan)}
+`Explain this implementation plan: ${JSON.stringify(plan).slice(0, 3000)}
 
-Return JSON with: title, summary, confidence, explanations (array of {object (string), why (string), what (string), assumptions (array of strings), risks (array of strings)}), implementationSequence (array of strings), timeEstimate (string), assumptions, warnings, humanReviewFlags, missingInputs, recommendations.
-
+Return JSON:
+{
+  "title": string,
+  "summary": string,
+  "confidence": "high"|"medium"|"low",
+  "explanations": [{"object": string, "why": string, "what": string, "assumptions": [string], "risks": [string]}],
+  "implementationSequence": [string],
+  "timeEstimate": string,
+  "assumptions": [string],
+  "warnings": [string],
+  "humanReviewFlags": [string],
+  "missingInputs": [string],
+  "recommendations": [string]
+}
 ${JSON_REMINDER}`
     };
   },
 
+  // ── Translate content ──────────────────────────────────────────────────────
   translateContent({ content, targetLanguage, sourceLanguage = 'en' }) {
     return {
       systemPrompt: BASE_SYSTEM,
       userMessage:
-`Translate this privacy content from ${sourceLanguage} to ${targetLanguage}:
+`Translate this privacy content from ${sourceLanguage} to ${targetLanguage}.
+CONTENT: ${JSON.stringify(content).slice(0, 3000)}
 
-${JSON.stringify(content)}
-
-Return JSON with: title, summary, confidence, translations (object with field names as keys and translated text as values), qualityWarnings (array of strings), assumptions, warnings, humanReviewFlags, missingInputs, recommendations. Flag any field where translation confidence is low.
-
+Return JSON:
+{
+  "title": string,
+  "summary": string,
+  "confidence": "high"|"medium"|"low",
+  "translations": {},
+  "qualityWarnings": [string],
+  "assumptions": [string],
+  "warnings": [string],
+  "humanReviewFlags": [string],
+  "missingInputs": [string],
+  "recommendations": [string]
+}
 ${JSON_REMINDER}`
     };
-  }
+  },
 };
 
 module.exports = { prompts, BASE_SYSTEM };

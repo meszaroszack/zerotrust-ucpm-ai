@@ -56,13 +56,22 @@ router.post('/', authenticate, async (req, res) => {
           legalBasis,
           organizationId: ws.activeOrgId,
         });
-        const otId = result.id || result.purposeId || result.data?.id;
-        purpose.createStatus = 'created';
-        purpose.oneTrustId = otId;
-        purpose.otResponse = { id: otId, status: result.status };
-        otLog('create:success', { name, otId });
-        WorkspaceModel.addArtifact({ type: 'purpose', name, otId });
-        WorkspaceModel.addChange({ action: 'create', objectType: 'purpose', name, otId });
+        // Use _resolvedId which is extracted robustly by the client
+        const otId = result._resolvedId;
+        if (!otId) {
+          // Treat missing OT ID as failure — don't show success when we can't verify creation
+          purpose.createStatus = 'failed';
+          purpose.lastError = 'OneTrust returned success but no object ID was present in the response. Check Railway logs for full OT response body.';
+          otLog('create:no-id', { name, response: JSON.stringify(result).slice(0, 300) });
+        } else {
+          purpose.createStatus = 'created';
+          purpose.oneTrustId = otId;
+          purpose.lastError = null;
+          purpose.otResponse = { id: otId, status: result.status };
+          otLog('create:success', { name, otId });
+          WorkspaceModel.addArtifact({ type: 'purpose', name, otId });
+          WorkspaceModel.addChange({ action: 'create', objectType: 'purpose', name, otId });
+        }
       } catch (err) {
         purpose.createStatus = 'failed';
         purpose.lastError = err.message;
@@ -106,13 +115,19 @@ router.patch('/:id', authenticate, async (req, res) => {
             legalBasis: updated.legalBasis,
             organizationId: ws.activeOrgId,
           });
-          const otId = result.id || result.purposeId || result.data?.id;
-          updated.createStatus = 'created';
-          updated.oneTrustId = otId;
-          updated.lastError = null;
-          otLog('create:success', { name: updated.name, otId });
-          WorkspaceModel.addArtifact({ type: 'purpose', name: updated.name, otId });
-          WorkspaceModel.addChange({ action: 'create', objectType: 'purpose', name: updated.name, otId });
+          const otId = result._resolvedId;
+          if (!otId) {
+            updated.createStatus = 'failed';
+            updated.lastError = 'OneTrust returned success but no object ID in response. Check Railway logs.';
+            otLog('create:no-id', { name: updated.name });
+          } else {
+            updated.createStatus = 'created';
+            updated.oneTrustId = otId;
+            updated.lastError = null;
+            otLog('create:success', { name: updated.name, otId });
+            WorkspaceModel.addArtifact({ type: 'purpose', name: updated.name, otId });
+            WorkspaceModel.addChange({ action: 'create', objectType: 'purpose', name: updated.name, otId });
+          }
         } else {
           await client.updatePurpose(updated.oneTrustId, {
             name: updated.name,

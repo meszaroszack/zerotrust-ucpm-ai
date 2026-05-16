@@ -39,9 +39,22 @@ class OneTrustClient {
   async request(method, path, data, params) {
     const token = await this.getToken();
     const url = `${this.baseUrl}${path}`;
-    const logCtx = { method, url, params: params || undefined, payloadKeys: data ? Object.keys(data) : undefined };
 
-    console.log('[OT]', JSON.stringify(logCtx));
+    // Full upstream logging — visible in Railway logs
+    const logEntry = {
+      method,
+      url,
+      baseUrl: this.baseUrl,
+      path,
+      params: params || undefined,
+      payloadSummary: data ? Object.fromEntries(
+        Object.entries(data).map(([k, v]) => [
+          k,
+          Array.isArray(v) ? `[${v.length} items]` : typeof v === 'string' ? v.slice(0, 80) : v
+        ])
+      ) : undefined,
+    };
+    console.log('[OT] REQUEST', JSON.stringify(logEntry));
 
     let resp;
     try {
@@ -60,15 +73,29 @@ class OneTrustClient {
     } catch (err) {
       const status = err.response?.status;
       const body = err.response?.data;
-      const msg = body?.message || body?.error || body?.errorMessage || err.message;
-      console.error('[OT] ERROR', JSON.stringify({ method, url, status, body }));
-      const error = new Error(`OneTrust API error [${status || 'network'}]: ${msg}`);
+      const rawMsg = body?.message || body?.error || body?.errorMessage ||
+                     (typeof body === 'string' ? body : null) || err.message;
+      // Log full error context so Railway logs show exact failure
+      console.error('[OT] ERROR', JSON.stringify({
+        method, url, status,
+        responseBody: body,
+        errorMessage: rawMsg,
+        hint: status === 404 ? 'Check tenant base URL and org/brand scoping — OT path may require /api/v3/ or a different tenant subdomain' : undefined,
+        hint401: status === 401 ? 'Token may be expired or client_id/secret wrong' : undefined,
+        hint400: status === 400 ? 'Check payload fields — organizationId may be required or field names differ by OT version' : undefined,
+      }));
+      const error = new Error(`OneTrust API error [${status || 'network'}] ${method} ${url}: ${rawMsg}`);
       error.status = status;
       error.otBody = body;
+      error.otUrl = url;
       throw error;
     }
 
-    console.log('[OT] OK', JSON.stringify({ method, url, status: resp.status, dataKeys: resp.data ? Object.keys(resp.data) : [] }));
+    console.log('[OT] OK', JSON.stringify({
+      method, url, status: resp.status,
+      responseKeys: resp.data ? Object.keys(resp.data) : [],
+      idInResponse: resp.data?.id || resp.data?.purposeId || resp.data?.collectionPointId || null,
+    }));
     return resp.data;
   }
 
@@ -101,7 +128,6 @@ class OneTrustClient {
   }
 
   async createPurpose({ name, description, legalBasis, organizationId }) {
-    // Map human-readable legalBasis to OT enum values
     const legalBasisMap = {
       'consent': 'CONSENT',
       'legitimate-interest': 'LEGITIMATE_INTEREST',
@@ -110,13 +136,21 @@ class OneTrustClient {
       'vital-interests': 'VITAL_INTERESTS',
       'public-task': 'PUBLIC_TASK',
     };
-    return await this.request('POST', '/api/consent/v2/purposes', {
+    const payload = {
       name,
       description: description || '',
       legalBasis: legalBasisMap[legalBasis] || legalBasis || 'CONSENT',
       organizationId,
       status: 'ACTIVE',
-    });
+    };
+    const resp = await this.request('POST', '/api/consent/v2/purposes', payload);
+    // Robustly extract the OT-assigned ID from any response shape
+    const otId = resp?.id || resp?.purposeId || resp?.data?.id || resp?.data?.purposeId ||
+                 resp?.content?.[0]?.id || null;
+    if (!otId) {
+      console.warn('[OT] createPurpose: response missing ID field. Full response:', JSON.stringify(resp));
+    }
+    return { ...resp, _resolvedId: otId };
   }
 
   async updatePurpose(purposeId, updates) {
@@ -159,17 +193,52 @@ class OneTrustClient {
   }
 
   async createCollectionPoint({ name, label, description, purposeIds, dataElementIds, locale, geoRuleGroupId, organizationId }) {
-    return await this.request('POST', '/api/consent/v2/collectionpoints', {
+    // purposeIds and dataElementIds must be real OT UUIDs (not local IDs or names).
+    // If an empty or name-only array is passed, send empty to avoid OT rejecting bad IDs.
+    const safePurposeIds = (purposeIds || []).filter(id => id && /^[0-9a-f-]{36}$/i.test(id));
+    const safeDeIds = (dataElementIds || []).filter(id => id && /^[0-9a-f-]{36}$/i.test(id));
+
+    if ((purposeIds || []).length !== safePurposeIds.length) {
+      console.warn('[OT] createCollectionPoint: some purposeIds were not valid OT UUIDs and were dropped.',
+        { originalCount: purposeIds?.length, validCount: safePurposeIds.length });
+    }
+
+    const payload = {
       name,
       label: label || name,
       description: description || '',
-      purposeIds: purposeIds || [],
-      dataElementIds: dataElementIds || [],
+      purposeIds: safePurposeIds,
+      dataElementIds: safeDeIds,
       locale: locale || 'en',
       geoRuleGroupId: geoRuleGroupId || null,
       organizationId,
       status: 'ACTIVE',
-    });
+    };
+
+    let resp;
+    try {
+      resp = await this.request('POST', '/api/consent/v2/collectionpoints', payload);
+    } catch (err) {
+      // 404 on /v2/ — some tenants use /v3/ path. Retry once.
+      if (err.status === 404) {
+        console.warn('[OT] createCollectionPoint: /v2/ returned 404 — retrying with /v3/ path');
+        try {
+          resp = await this.request('POST', '/api/consent/v3/collectionpoints', payload);
+        } catch (err2) {
+          // Re-throw original error with both paths noted
+          throw new Error(`OneTrust CP creation failed on both /v2/ and /v3/ paths. v2 error: ${err.message} | v3 error: ${err2.message}. Check tenant base URL in Settings.`);
+        }
+      } else {
+        throw err;
+      }
+    }
+
+    const otId = resp?.id || resp?.collectionPointId || resp?.data?.id ||
+                 resp?.data?.collectionPointId || resp?.content?.[0]?.id || null;
+    if (!otId) {
+      console.warn('[OT] createCollectionPoint: response missing ID field. Full response:', JSON.stringify(resp));
+    }
+    return { ...resp, _resolvedId: otId };
   }
 
   async getCollectionPoint(cpId) {
