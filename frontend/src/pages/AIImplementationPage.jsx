@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Brain, Upload, FileText, MessageSquare, Sparkles, CheckCircle2, AlertTriangle, ArrowRight, ChevronDown, ChevronUp, Loader2, Info } from 'lucide-react';
+import { Brain, Upload, FileText, MessageSquare, Sparkles, CheckCircle2, AlertTriangle, AlertCircle, ArrowRight, ChevronDown, ChevronUp, Loader2, Info } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { uploadDocument, aiIntakeDocument, aiAskFollowups, aiExtractProgram, aiGenerateScenarios, aiRecommendPurposes, aiRecommendDataElements, aiRecommendCollectionPoints } from '../utils/api';
 import { useAppStore } from '../store/appStore';
@@ -143,19 +143,20 @@ export default function AIImplementationPage() {
   const [blueprint, setBlueprint] = useState(null);
   const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('');
+  const [pageError, setPageError] = useState('');
 
   const onDrop = useCallback(async (files) => {
     const file = files[0];
     if (!file) return;
     const fd = new FormData();
     fd.append('document', file);
-    setLoading(true); setLoadingMsg('Extracting document...');
+    setLoading(true); setLoadingMsg('Extracting document...'); setPageError('');
     try {
       const r = await uploadDocument(fd);
       setUploadedFile(r.data.file);
       setIntakeText(r.data.file.extractedText || '');
     } catch (e) {
-      alert('Upload failed: ' + e.message);
+      setPageError('Upload failed: ' + (e.response?.data?.error || e.message));
     } finally { setLoading(false); }
   }, []);
 
@@ -163,38 +164,37 @@ export default function AIImplementationPage() {
 
   const handleIntake = async () => {
     if (!intakeText.trim()) return;
-    setLoading(true); setLoadingMsg('AI is analyzing your document...');
+    setLoading(true); setLoadingMsg('AI is analyzing your requirements...'); setPageError('');
     try {
       const r = await aiIntakeDocument({ content: intakeText, filename: uploadedFile?.originalName });
       setIntakeResult(r.data);
     } catch (e) {
-      alert('AI intake failed: ' + e.message);
+      setPageError(e.response?.data?.error || 'AI analysis failed. Please try again.');
     } finally { setLoading(false); }
   };
 
   const handleFollowups = async () => {
-    setLoading(true); setLoadingMsg('Generating follow-up questions...');
+    setLoading(true); setLoadingMsg('Generating expert follow-up questions...'); setPageError('');
     try {
       const ctx = { ...intakeResult, brandName: workspace?.activeBrandName };
       const r = await aiAskFollowups({ context: ctx });
       setQuestions(r.data?.questions || []);
       setPhase('followup');
     } catch (e) {
-      alert('Failed to generate questions: ' + e.message);
+      setPageError(e.response?.data?.error || 'Could not generate questions. Please try again.');
     } finally { setLoading(false); }
   };
 
   const handleGenerateBlueprint = async () => {
-    setLoading(true); setLoadingMsg('Building implementation blueprint...');
+    setLoading(true); setLoadingMsg('Building implementation blueprint...'); setPageError('');
     try {
       const ctx = { ...intakeResult, answers, brandName: workspace?.activeBrandName };
-      const [prog, scenarios, purposes, elements, cps] = await Promise.all([
-        aiExtractProgram({ context: ctx }),
-        aiGenerateScenarios({ context: ctx }),
-        aiRecommendPurposes({ context: ctx }),
-        aiRecommendDataElements({ context: ctx }),
-        aiRecommendCollectionPoints({ context: ctx }),
-      ]);
+      // Run sequentially to avoid hammering the API
+      const prog = await aiExtractProgram({ context: ctx });
+      const scenarios = await aiGenerateScenarios({ context: ctx });
+      const purposes = await aiRecommendPurposes({ context: ctx });
+      const elements = await aiRecommendDataElements({ context: ctx });
+      const cps = await aiRecommendCollectionPoints({ context: ctx });
       const bp = {
         program: prog.data,
         scenarios: scenarios.data,
@@ -205,7 +205,7 @@ export default function AIImplementationPage() {
       setBlueprint(bp);
       setPhase('blueprint');
     } catch (e) {
-      alert('Blueprint generation failed: ' + e.message);
+      setPageError(e.response?.data?.error || 'Blueprint generation failed. Please try again.');
     } finally { setLoading(false); }
   };
 
@@ -263,6 +263,13 @@ export default function AIImplementationPage() {
                 placeholder={`Example:\n"We are a B2B SaaS company serving customers in Germany, UK, and California. We collect email, company name, and job title for marketing. We run Google Analytics and Meta Pixel..."`}
               />
             </div>
+
+            {pageError && (
+              <div className="flex items-start gap-2 p-3 rounded-lg bg-red-950/50 border border-red-900/50 text-red-400 text-sm">
+                <AlertCircle size={15} className="flex-shrink-0 mt-0.5" />
+                <span>{pageError}</span>
+              </div>
+            )}
 
             {intakeResult && <AICard result={intakeResult} />}
 
