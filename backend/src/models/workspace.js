@@ -105,7 +105,7 @@ const SettingsModel = {
   get() {
     return readJSON(SETTINGS_FILE, {
       aiProviders: {
-        perplexity: { enabled: true, model: process.env.PERPLEXITY_MODEL || 'llama-3.1-sonar-large-128k-online', apiKey: '' },
+        perplexity: { enabled: true, model: process.env.PERPLEXITY_MODEL || 'sonar', apiKey: '' },
         openai: { enabled: false, model: 'gpt-4o', apiKey: '' },
         anthropic: { enabled: false, model: 'claude-3-5-sonnet-20241022', apiKey: '' },
         gemini: { enabled: false, model: 'gemini-1.5-pro', apiKey: '' },

@@ -69,7 +69,7 @@ Pressing **Reset Program** in the sidebar:
 ### Active: Perplexity
 Perplexity is the live AI engine. Set `PERPLEXITY_API_KEY` and `PERPLEXITY_MODEL` in your env.
 
-Recommended model: `llama-3.1-sonar-large-128k-online`
+Recommended model: `sonar`
 
 ### Scaffolded (future-ready):
 - OpenAI (`openaiProvider.js`)
@@ -123,7 +123,7 @@ APP_ADMIN_EMAIL=your@email.com
 APP_ADMIN_PASSWORD=YourSecurePassword123!
 APP_SESSION_SECRET=a-long-random-string-for-jwt-signing
 PERPLEXITY_API_KEY=pplx-your-key
-PERPLEXITY_MODEL=llama-3.1-sonar-large-128k-online
+PERPLEXITY_MODEL=sonar
 PORT=3000
 NODE_ENV=production
 ```
@@ -152,7 +152,7 @@ NODE_ENV=production
 | `APP_ADMIN_PASSWORD` | Yes | Login password |
 | `APP_SESSION_SECRET` | Yes | JWT signing secret (random 32+ char string) |
 | `PERPLEXITY_API_KEY` | Yes | Perplexity API key |
-| `PERPLEXITY_MODEL` | No | Default: `llama-3.1-sonar-large-128k-online` |
+| `PERPLEXITY_MODEL` | No | Default: `sonar` (valid: sonar, sonar-pro, sonar-reasoning, sonar-reasoning-pro, r1-1776) |
 | `PORT` | No | Default: 3000 |
 | `NODE_ENV` | No | Set to `production` for Railway |
 

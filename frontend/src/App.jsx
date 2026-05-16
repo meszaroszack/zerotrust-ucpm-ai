@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useAppStore } from './store/appStore';
-import { getSetupStatus } from './utils/api';
+import { getSetupStatus, getWorkspace } from './utils/api';
 import SetupPage from './pages/SetupPage';
 import LoginPage from './pages/LoginPage';
 import AppShell from './components/layout/AppShell';
@@ -44,6 +44,8 @@ function Spinner() {
 
 export default function App() {
   const theme = useAppStore(s => s.theme);
+  const isAuthenticated = useAppStore(s => s.isAuthenticated);
+  const setWorkspace = useAppStore(s => s.setWorkspace);
   // 'loading' | 'setup' | 'ready'
   const [appState, setAppState] = useState('loading');
 
@@ -62,10 +64,23 @@ export default function App() {
       })
       .catch(() => {
         // Can't reach backend yet — show setup so they can configure it
-        // (better than a broken login screen)
         setAppState('setup');
       });
   }, []);
+
+  // On mount, if user is authenticated, re-sync workspace from server.
+  // This keeps the cached workspace (used to prevent RequireWorkspace bounce)
+  // in sync after a refresh without sending the user back to /connect.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    getWorkspace()
+      .then(r => {
+        if (r.data?.active && r.data?.workspace) {
+          setWorkspace(r.data.workspace);
+        }
+      })
+      .catch(() => {}); // silent — cached value still protects the route
+  }, [isAuthenticated]);
 
   if (appState === 'loading') return <Spinner />;
 

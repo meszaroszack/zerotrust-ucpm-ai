@@ -1,34 +1,21 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Brain, Upload, FileText, MessageSquare, Sparkles, CheckCircle2,
   AlertTriangle, AlertCircle, ArrowRight, ChevronDown, ChevronUp,
-  Loader2, Info
+  Loader2, Info, RefreshCw
 } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import {
   uploadDocument, aiIntakeDocument, aiAskFollowups,
   aiExtractProgram, aiGenerateScenarios, aiRecommendPurposes,
-  aiRecommendDataElements, aiRecommendCollectionPoints
+  aiRecommendDataElements, aiRecommendCollectionPoints,
+  updateWorkspace
 } from '../utils/api';
 import { useAppStore } from '../store/appStore';
 import { clsx } from 'clsx';
 
 const PHASES = ['intake', 'followup', 'blueprint', 'approve'];
-const SESSION_KEY = 'zt_planner_session';
-
-// ---------------------------------------------------------------------------
-// sessionStorage helpers — persist planner state across hard refreshes
-// ---------------------------------------------------------------------------
-function saveSession(data) {
-  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(data)); } catch {}
-}
-function loadSession() {
-  try { const raw = sessionStorage.getItem(SESSION_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; }
-}
-function clearSession() {
-  try { sessionStorage.removeItem(SESSION_KEY); } catch {}
-}
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -47,7 +34,7 @@ function AICard({ result, onApprove }) {
         <Sparkles size={15} className="text-brand-accent" />
         <div className="flex-1">
           <div className="font-heading font-semibold text-white text-sm">{result.title || 'AI Analysis'}</div>
-          <div className="text-xs text-slate-500 mt-0.5">{result.summary?.slice(0, 120)}...</div>
+          <div className="text-xs text-slate-500 mt-0.5">{result.summary?.slice(0, 120)}{result.summary?.length > 120 ? '…' : ''}</div>
         </div>
         <ConfidenceBadge level={result.confidence} />
       </div>
@@ -151,7 +138,9 @@ function FollowupQuestions({ questions, answers, onChange, onSubmit, loading }) 
         ))}
       </div>
       <button onClick={onSubmit} disabled={loading} className="btn-primary w-full justify-center mt-4">
-        {loading ? <><Loader2 size={15} className="animate-spin" />Generating Blueprint...</> : <>Generate Implementation Blueprint <Sparkles size={15} /></>}
+        {loading
+          ? <><Loader2 size={15} className="animate-spin" />Generating Blueprint...</>
+          : <>Generate Implementation Blueprint <Sparkles size={15} /></>}
       </button>
     </div>
   );
@@ -161,36 +150,28 @@ function FollowupQuestions({ questions, answers, onChange, onSubmit, loading }) 
 // Main page
 // ---------------------------------------------------------------------------
 export default function AIImplementationPage() {
-  const { workspace } = useAppStore();
+  const { setPlannerState, clearPlannerState } = useAppStore();
+  const savedPlanner = useAppStore(s => s.plannerState);
 
-  // All planner state — initialized from sessionStorage if available
-  const [phase, setPhase] = useState('intake');
-  const [intakeText, setIntakeText] = useState('');
-  const [uploadedFile, setUploadedFile] = useState(null);
-  const [intakeResult, setIntakeResult] = useState(null);
-  const [questions, setQuestions] = useState([]);
-  const [answers, setAnswers] = useState({});
-  const [blueprint, setBlueprint] = useState(null);
+  // All planner state — initialised from persisted store if available
+  const [phase, setPhase] = useState(savedPlanner?.phase || 'intake');
+  const [intakeText, setIntakeText] = useState(savedPlanner?.intakeText || '');
+  const [uploadedFile, setUploadedFile] = useState(savedPlanner?.uploadedFile || null);
+  const [intakeResult, setIntakeResult] = useState(savedPlanner?.intakeResult || null);
+  const [questions, setQuestions] = useState(savedPlanner?.questions || []);
+  const [answers, setAnswers] = useState(savedPlanner?.answers || {});
+  const [blueprint, setBlueprint] = useState(savedPlanner?.blueprint || null);
   const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState('');
   const [pageError, setPageError] = useState('');
 
-  // ── Rehydrate from sessionStorage on first mount ──────────────────────────
-  useEffect(() => {
-    const saved = loadSession();
-    if (!saved) return;
-    if (saved.phase) setPhase(saved.phase);
-    if (saved.intakeText) setIntakeText(saved.intakeText);
-    if (saved.uploadedFile) setUploadedFile(saved.uploadedFile);
-    if (saved.intakeResult) setIntakeResult(saved.intakeResult);
-    if (saved.questions?.length) setQuestions(saved.questions);
-    if (saved.answers) setAnswers(saved.answers);
-    if (saved.blueprint) setBlueprint(saved.blueprint);
-  }, []);
+  // Ref to track whether we're mid-request (prevents double-persist)
+  const isMounted = useRef(true);
+  useEffect(() => { return () => { isMounted.current = false; }; }, []);
 
-  // ── Persist key state to sessionStorage whenever it changes ──────────────
+  // ── Persist planner state to store whenever anything changes ─────────────
   useEffect(() => {
-    saveSession({ phase, intakeText, uploadedFile, intakeResult, questions, answers, blueprint });
+    setPlannerState({ phase, intakeText, uploadedFile, intakeResult, questions, answers, blueprint });
   }, [phase, intakeText, uploadedFile, intakeResult, questions, answers, blueprint]);
 
   // ── File drop ─────────────────────────────────────────────────────────────
@@ -199,7 +180,7 @@ export default function AIImplementationPage() {
     if (!file) return;
     const fd = new FormData();
     fd.append('document', file);
-    setLoading(true); setLoadingMsg('Extracting document...'); setPageError('');
+    setLoading(true); setLoadingMsg('Extracting document…'); setPageError('');
     try {
       const r = await uploadDocument(fd);
       setUploadedFile(r.data.file);
@@ -213,10 +194,10 @@ export default function AIImplementationPage() {
     onDrop, accept: { 'application/pdf': [], 'text/plain': [] }, maxFiles: 1
   });
 
-  // ── Intake ────────────────────────────────────────────────────────────────
+  // ── Intake ─────────────────────────────────────────────────────────────────
   const handleIntake = async () => {
     if (!intakeText.trim()) return;
-    setLoading(true); setLoadingMsg('AI is analyzing your requirements...'); setPageError('');
+    setLoading(true); setLoadingMsg('AI is analyzing your requirements…'); setPageError('');
     try {
       const r = await aiIntakeDocument({ content: intakeText, filename: uploadedFile?.originalName });
       setIntakeResult(r.data);
@@ -225,49 +206,37 @@ export default function AIImplementationPage() {
     } finally { setLoading(false); }
   };
 
-  // ── Followups — fixed ─────────────────────────────────────────────────────
+  // ── Followups ──────────────────────────────────────────────────────────────
   const handleFollowups = async () => {
-    setLoading(true); setLoadingMsg('Generating expert follow-up questions...'); setPageError('');
-    // Move to followup phase immediately so the user sees a loading state there
+    // Move to followup phase immediately so user sees the loading state there
     setPhase('followup');
+    setQuestions([]);
+    setPageError('');
+    setLoading(true); setLoadingMsg('Generating expert follow-up questions…');
     try {
-      const ctx = { ...intakeResult, brandName: workspace?.activeBrandName };
-      const r = await aiAskFollowups({ context: ctx });
+      const r = await aiAskFollowups({ context: intakeResult });
+      // Backend validates shape — r.data.questions is guaranteed to be a non-empty array here
+      // But normalise defensively in case of edge cases
+      const qs = Array.isArray(r.data?.questions)
+        ? r.data.questions
+        : Array.isArray(r.data) ? r.data : [];
 
-      // Backend returns the parsed AI object directly: { questions: [...], title, summary, ... }
-      // Normalise: accept both r.data.questions and r.data itself being an array
-      const payload = r.data;
-      const qs = Array.isArray(payload?.questions)
-        ? payload.questions
-        : Array.isArray(payload)
-        ? payload
-        : null;
-
-      if (!qs || qs.length === 0) {
-        setPageError(
-          'AI returned no follow-up questions. ' +
-          (payload?.summary ? `AI said: "${payload.summary}"` : 'The response may be malformed — check Railway logs.')
-        );
-        // Stay on followup so the error renders; don't spin forever
-        setQuestions([]);
+      if (qs.length === 0) {
+        setPageError('AI returned no questions. ' + (r.data?.summary || 'Please retry.'));
         return;
       }
-
       setQuestions(qs);
-      setPageError('');
     } catch (e) {
-      setPageError(e.response?.data?.error || e.message || 'Could not generate questions. Please try again.');
-      setQuestions([]);
-    } finally {
-      setLoading(false);
-    }
+      setPageError(e.response?.data?.error || e.message || 'Could not generate questions. Please retry.');
+    } finally { setLoading(false); }
   };
 
-  // ── Blueprint ─────────────────────────────────────────────────────────────
+  // ── Blueprint ──────────────────────────────────────────────────────────────
   const handleGenerateBlueprint = async () => {
-    setLoading(true); setLoadingMsg('Building implementation blueprint...'); setPageError('');
+    setLoading(true); setLoadingMsg('Building implementation blueprint…'); setPageError('');
     try {
-      const ctx = { ...intakeResult, answers, brandName: workspace?.activeBrandName };
+      const ctx = { ...intakeResult, answers };
+      // Run all five concurrently — each failure is isolated
       const [prog, scenarios, purposes, elements, cps] = await Promise.allSettled([
         aiExtractProgram({ context: ctx }),
         aiGenerateScenarios({ context: ctx }),
@@ -275,6 +244,7 @@ export default function AIImplementationPage() {
         aiRecommendDataElements({ context: ctx }),
         aiRecommendCollectionPoints({ context: ctx }),
       ]);
+
       const bp = {
         program:          prog.status      === 'fulfilled' ? prog.value.data      : null,
         scenarios:        scenarios.status === 'fulfilled' ? scenarios.value.data : null,
@@ -282,22 +252,41 @@ export default function AIImplementationPage() {
         dataElements:     elements.status  === 'fulfilled' ? elements.value.data  : null,
         collectionPoints: cps.status       === 'fulfilled' ? cps.value.data       : null,
       };
+
+      // Surface partial failures as warnings (don't block the blueprint)
+      const failed = [
+        prog, scenarios, purposes, elements, cps
+      ].filter(r => r.status === 'rejected').map(r => r.reason?.message || 'Unknown error');
+      if (failed.length > 0) {
+        setPageError(`Blueprint generated with ${failed.length} partial failure(s): ${failed.join('; ')}`);
+      }
+
       setBlueprint(bp);
+
+      // Persist blueprint to server workspace so it survives full reload
+      try {
+        await updateWorkspace({
+          plannerBlueprint: bp,
+          plannerAnswers: answers,
+          plannerPhase: 'blueprint',
+        });
+      } catch {} // non-fatal
+
       setPhase('blueprint');
     } catch (e) {
       setPageError(e.response?.data?.error || 'Blueprint generation failed. Please try again.');
     } finally { setLoading(false); }
   };
 
-  // ── Reset planner ─────────────────────────────────────────────────────────
+  // ── Reset ──────────────────────────────────────────────────────────────────
   const handleReset = () => {
-    clearSession();
+    clearPlannerState();
     setPhase('intake'); setIntakeText(''); setUploadedFile(null);
     setIntakeResult(null); setQuestions([]); setAnswers({});
     setBlueprint(null); setLoading(false); setPageError('');
   };
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="max-w-3xl mx-auto animate-fade-in">
       <div className="mb-8 flex items-start justify-between">
@@ -311,8 +300,8 @@ export default function AIImplementationPage() {
           </p>
         </div>
         {phase !== 'intake' && (
-          <button onClick={handleReset} className="btn-ghost text-xs mt-1 flex-shrink-0">
-            Start over
+          <button onClick={handleReset} className="btn-ghost text-xs mt-2 flex-shrink-0 flex items-center gap-1.5">
+            <RefreshCw size={12} />Start over
           </button>
         )}
       </div>
@@ -322,7 +311,12 @@ export default function AIImplementationPage() {
         {PHASES.map((p, i) => (
           <button
             key={p}
-            onClick={() => i <= PHASES.indexOf(phase) && setPhase(p)}
+            onClick={() => {
+              if (i <= PHASES.indexOf(phase)) {
+                setPhase(p);
+                setPageError('');
+              }
+            }}
             className={clsx('flex-1 py-1.5 px-2 rounded-lg text-xs font-medium transition-all capitalize', {
               'bg-brand-primary text-white shadow': p === phase,
               'text-slate-500 hover:text-slate-300': p !== phase && i <= PHASES.indexOf(phase),
@@ -336,7 +330,7 @@ export default function AIImplementationPage() {
 
       <AnimatePresence mode="wait">
 
-        {/* ── Intake Phase ── */}
+        {/* ── Intake Phase ─────────────────────────────────────────────────── */}
         {phase === 'intake' && (
           <motion.div key="intake" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
             <div
@@ -379,7 +373,11 @@ export default function AIImplementationPage() {
             {intakeResult && <AICard result={intakeResult} />}
 
             <div className="flex gap-3">
-              <button onClick={handleIntake} disabled={loading || !intakeText} className="btn-primary flex-1 justify-center">
+              <button
+                onClick={handleIntake}
+                disabled={loading || !intakeText.trim()}
+                className="btn-primary flex-1 justify-center"
+              >
                 {loading
                   ? <><Loader2 size={15} className="animate-spin" />{loadingMsg}</>
                   : <><Brain size={15} />Analyze with AI</>}
@@ -393,33 +391,33 @@ export default function AIImplementationPage() {
           </motion.div>
         )}
 
-        {/* ── Followup Phase ── */}
+        {/* ── Followup Phase ───────────────────────────────────────────────── */}
         {phase === 'followup' && (
           <motion.div key="followup" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
 
-            {/* Error banner — shown when payload is bad or request failed */}
+            {/* Error — real error from server or empty questions */}
             {pageError && (
               <div className="flex items-start gap-2 p-3 rounded-lg bg-red-950/50 border border-red-900/50 text-red-400 text-sm">
                 <AlertCircle size={15} className="flex-shrink-0 mt-0.5" />
                 <div className="flex-1">
-                  <span>{pageError}</span>
-                  <button onClick={handleFollowups} className="block mt-2 text-xs underline text-red-300 hover:text-red-100">
+                  <p>{pageError}</p>
+                  <button onClick={handleFollowups} className="mt-2 text-xs underline text-red-300 hover:text-red-100">
                     Retry
                   </button>
                 </div>
               </div>
             )}
 
-            {/* Loading state — only shown while request in flight AND no questions yet */}
+            {/* Loading — only while request in flight and no questions yet */}
             {loading && questions.length === 0 && !pageError && (
-              <div className="card-dark p-6 text-center">
-                <Loader2 size={24} className="animate-spin text-brand-primary mx-auto mb-3" />
-                <p className="text-slate-400 text-sm">{loadingMsg || 'Generating questions...'}</p>
+              <div className="card-dark p-8 text-center">
+                <Loader2 size={28} className="animate-spin text-brand-primary mx-auto mb-3" />
+                <p className="text-slate-400 text-sm">{loadingMsg}</p>
               </div>
             )}
 
-            {/* Questions — shown once we have them */}
-            {!loading && questions.length > 0 && !pageError && (
+            {/* Questions rendered — the normal success path */}
+            {questions.length > 0 && (
               <FollowupQuestions
                 questions={questions}
                 answers={answers}
@@ -429,11 +427,11 @@ export default function AIImplementationPage() {
               />
             )}
 
-            {/* Edge case: request finished, no error, no questions */}
+            {/* Finished, no error, no questions — edge case */}
             {!loading && questions.length === 0 && !pageError && (
               <div className="card-dark p-6 text-center">
-                <AlertTriangle size={24} className="text-amber-500 mx-auto mb-3" />
-                <p className="text-slate-400 text-sm mb-3">No questions were returned. You can retry or skip to blueprint.</p>
+                <AlertTriangle size={28} className="text-amber-500 mx-auto mb-3" />
+                <p className="text-slate-400 text-sm mb-4">No questions were returned. You can retry or skip to blueprint generation.</p>
                 <div className="flex gap-3 justify-center">
                   <button onClick={handleFollowups} className="btn-secondary text-xs">Retry</button>
                   <button onClick={handleGenerateBlueprint} disabled={loading} className="btn-accent text-xs">
@@ -445,9 +443,17 @@ export default function AIImplementationPage() {
           </motion.div>
         )}
 
-        {/* ── Blueprint Phase ── */}
+        {/* ── Blueprint Phase ──────────────────────────────────────────────── */}
         {phase === 'blueprint' && blueprint && (
           <motion.div key="blueprint" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
+
+            {pageError && (
+              <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-950/40 border border-amber-900/40 text-amber-400 text-xs">
+                <AlertTriangle size={13} className="flex-shrink-0 mt-0.5" />
+                <span>{pageError}</span>
+              </div>
+            )}
+
             <div className="card-dark p-5 border-brand-primary/20 border">
               <div className="flex items-center gap-2 mb-4">
                 <Sparkles size={16} className="text-brand-primary" />
@@ -457,10 +463,10 @@ export default function AIImplementationPage() {
 
               <div className="grid grid-cols-2 gap-3 mb-4">
                 {[
-                  { label: 'Purposes',         count: blueprint.purposes?.proposedObjects?.length || 0 },
-                  { label: 'Data Elements',    count: blueprint.dataElements?.proposedObjects?.length || 0 },
-                  { label: 'Scenarios',        count: blueprint.scenarios?.scenarios?.length || 0 },
-                  { label: 'Collection Points',count: blueprint.collectionPoints?.proposedObjects?.length || 0 },
+                  { label: 'Purposes',          count: blueprint.purposes?.proposedObjects?.length || 0 },
+                  { label: 'Data Elements',     count: blueprint.dataElements?.proposedObjects?.length || 0 },
+                  { label: 'Scenarios',         count: blueprint.scenarios?.scenarios?.length || 0 },
+                  { label: 'Collection Points', count: blueprint.collectionPoints?.proposedObjects?.length || 0 },
                 ].map((s) => (
                   <div key={s.label} className="p-3 rounded-lg bg-white/3 border border-white/6 text-center">
                     <div className="text-2xl font-heading font-bold text-white">{s.count}</div>
@@ -471,11 +477,13 @@ export default function AIImplementationPage() {
 
               <div className="flex items-center gap-2 p-3 rounded-lg bg-blue-950/30 border border-blue-900/20 text-xs text-blue-400 mb-4">
                 <Info size={12} />
-                <span>This is a regulatory-informed implementation recommendation. Human review required before production deployment.</span>
+                <span>Regulatory-informed implementation recommendation. Human review required before production deployment.</span>
               </div>
 
               <div className="flex gap-3">
-                <button onClick={() => setPhase('followup')} className="btn-secondary">Revise Questions</button>
+                <button onClick={() => { setPhase('followup'); setPageError(''); }} className="btn-secondary">
+                  Revise Questions
+                </button>
                 <button onClick={() => setPhase('approve')} className="btn-accent flex-1 justify-center">
                   Review & Approve <ArrowRight size={15} />
                 </button>
@@ -501,7 +509,7 @@ export default function AIImplementationPage() {
           </motion.div>
         )}
 
-        {/* ── Approve Phase ── */}
+        {/* ── Approve Phase ────────────────────────────────────────────────── */}
         {phase === 'approve' && (
           <motion.div key="approve" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="card-dark p-6 text-center">
             <CheckCircle2 size={48} className="text-brand-accent mx-auto mb-4" />
@@ -510,10 +518,16 @@ export default function AIImplementationPage() {
               Your implementation model has been saved to the active workspace. Proceed to create OneTrust objects.
             </p>
             <div className="flex gap-3 justify-center">
-              <button onClick={() => { clearSession(); window.location.href = '/purposes'; }} className="btn-primary">
+              <button
+                onClick={() => { clearPlannerState(); window.location.href = '/purposes'; }}
+                className="btn-primary"
+              >
                 Go to Purposes &amp; Data
               </button>
-              <button onClick={() => { clearSession(); window.location.href = '/scenarios'; }} className="btn-accent">
+              <button
+                onClick={() => { clearPlannerState(); window.location.href = '/scenarios'; }}
+                className="btn-accent"
+              >
                 Go to Scenario Studio
               </button>
             </div>
